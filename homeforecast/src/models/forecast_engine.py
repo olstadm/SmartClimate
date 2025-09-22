@@ -44,8 +44,34 @@ class ForecastEngine:
             Forecast results with multiple trajectories
         """
         try:
+            logger.info("=== Starting Forecast Generation ===")
+            logger.info(f"Current data keys: {list(current_data.keys())}")
+            logger.info(f"Current indoor temp: {current_data.get('indoor_temp')}°F")
+            logger.info(f"Current outdoor temp: {current_data.get('outdoor_temp')}°F")
+            logger.info(f"Weather forecast keys: {list(weather_forecast.keys())}")
+            
+            if 'current_outdoor' in weather_forecast:
+                current_outdoor = weather_forecast['current_outdoor']
+                logger.info(f"AccuWeather current: {current_outdoor.get('temperature')}°F, {current_outdoor.get('humidity')}%")
+            else:
+                logger.warning("No current_outdoor data from AccuWeather")
+                
+            if 'hourly_forecast' in weather_forecast:
+                hourly_count = len(weather_forecast['hourly_forecast'])
+                logger.info(f"AccuWeather hourly forecast points: {hourly_count}")
+                if hourly_count > 0:
+                    first_hour = weather_forecast['hourly_forecast'][0]
+                    logger.info(f"First forecast hour: {first_hour.get('temperature')}°F at {first_hour.get('timestamp')}")
+            else:
+                logger.warning("No hourly_forecast data from AccuWeather")
+            
             # Prepare outdoor conditions series
+            logger.info("Preparing outdoor conditions series...")
             outdoor_series = self._prepare_outdoor_series(current_data, weather_forecast)
+            logger.info(f"Generated outdoor series with {len(outdoor_series)} points")
+            if outdoor_series:
+                logger.info(f"First outdoor point: {outdoor_series[0]['outdoor_temp']}°F at {outdoor_series[0]['timestamp']}")
+                logger.info(f"Last outdoor point: {outdoor_series[-1]['outdoor_temp']}°F at {outdoor_series[-1]['timestamp']}")
             
             # Initialize state
             initial_state = {
@@ -95,22 +121,38 @@ class ForecastEngine:
             
     def _prepare_outdoor_series(self, current_data: Dict, weather_forecast: Dict) -> List[Dict]:
         """Prepare outdoor conditions time series"""
+        logger.info("=== Preparing Outdoor Conditions Series ===")
         series = []
         
         # Use current outdoor temp if available, otherwise use AccuWeather current
         current_outdoor_temp = current_data.get('outdoor_temp')
+        logger.info(f"Local outdoor temp from sensors: {current_outdoor_temp}°F")
+        
         if current_outdoor_temp is None:
-            current_outdoor_temp = weather_forecast.get('current_outdoor', {}).get('temperature', 20)
+            accuweather_temp = weather_forecast.get('current_outdoor', {}).get('temperature')
+            current_outdoor_temp = accuweather_temp if accuweather_temp is not None else 70.0  # Fahrenheit fallback
+            logger.info(f"Using AccuWeather current temp: {current_outdoor_temp}°F")
+        else:
+            logger.info(f"Using local sensor outdoor temp: {current_outdoor_temp}°F")
             
         current_outdoor_humidity = current_data.get('outdoor_humidity')
+        logger.info(f"Local outdoor humidity from sensors: {current_outdoor_humidity}%")
+        
         if current_outdoor_humidity is None:
-            current_outdoor_humidity = weather_forecast.get('current_outdoor', {}).get('humidity', 50)
+            accuweather_humidity = weather_forecast.get('current_outdoor', {}).get('humidity')
+            current_outdoor_humidity = accuweather_humidity if accuweather_humidity is not None else 50.0
+            logger.info(f"Using AccuWeather current humidity: {current_outdoor_humidity}%")
+        else:
+            logger.info(f"Using local sensor outdoor humidity: {current_outdoor_humidity}%")
             
         # Start with current conditions
         current_time = datetime.now()
         
         # Build series from forecast
         forecast_data = weather_forecast.get('hourly_forecast', [])
+        logger.info(f"Processing {len(forecast_data)} hourly forecast points for {self.horizon_steps} simulation steps")
+        
+        forecast_hours_used = []
         
         for i in range(self.horizon_steps):
             timestamp = current_time + timedelta(minutes=i * self.time_step_minutes)
@@ -119,13 +161,19 @@ class ForecastEngine:
             forecast_temp = current_outdoor_temp
             forecast_humidity = current_outdoor_humidity
             solar_irradiance = 0
+            matched_hour = None
             
             for forecast_hour in forecast_data:
-                if hasattr(forecast_hour.get('timestamp'), 'hour'):
-                    if forecast_hour['timestamp'].hour == timestamp.hour:
+                forecast_timestamp = forecast_hour.get('timestamp')
+                if hasattr(forecast_timestamp, 'hour'):
+                    if forecast_timestamp.hour == timestamp.hour:
                         forecast_temp = forecast_hour.get('temperature', forecast_temp)
                         forecast_humidity = forecast_hour.get('humidity', forecast_humidity)
                         solar_irradiance = forecast_hour.get('solar_irradiance', 0)
+                        matched_hour = forecast_timestamp.hour
+                        if matched_hour not in forecast_hours_used:
+                            forecast_hours_used.append(matched_hour)
+                            logger.info(f"Hour {matched_hour}: Using forecast temp {forecast_temp}°F, humidity {forecast_humidity}%")
                         break
                         
             # Interpolate between hours if needed

@@ -35,24 +35,59 @@ def create_app(homeforecast_instance):
     def get_status():
         """Get current addon status"""
         try:
+            logger.info("🌐 API: Processing /api/status request")
+            
             # Get current sensor data for display
             current_data = {}
             try:
                 # This will be synchronous, so we need to be careful about blocking
                 # For now, we'll just get the model state which should have the latest data
                 model_params = app.homeforecast.thermal_model.get_parameters()
+                logger.info(f"Model parameters retrieved: {model_params}")
+                
+                # Try to get current data from thermal model
+                indoor_temp = getattr(app.homeforecast.thermal_model, 'current_indoor_temp', None)
+                outdoor_temp = getattr(app.homeforecast.thermal_model, 'current_outdoor_temp', None)
+                hvac_state = getattr(app.homeforecast.thermal_model, 'current_hvac_state', 'unknown')
+                
+                logger.info(f"Current data from model - Indoor: {indoor_temp}°F, Outdoor: {outdoor_temp}°F, HVAC: {hvac_state}")
+                
+                # If model doesn't have current data, try to get from data store
+                if indoor_temp is None:
+                    logger.info("No current data in model, trying data store...")
+                    try:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        recent_data = loop.run_until_complete(
+                            app.homeforecast.data_store.get_recent_measurements(hours=1)
+                        )
+                        if recent_data:
+                            latest = recent_data[-1]  # Most recent measurement
+                            indoor_temp = latest.get('indoor_temp')
+                            outdoor_temp = latest.get('outdoor_temp')
+                            hvac_state = latest.get('hvac_state', 'unknown')
+                            logger.info(f"Data from store - Indoor: {indoor_temp}°F, Outdoor: {outdoor_temp}°F, HVAC: {hvac_state}")
+                    except Exception as store_e:
+                        logger.warning(f"Could not get data from store: {store_e}")
+                
                 current_data = {
-                    'indoor_temp': getattr(app.homeforecast.thermal_model, 'current_indoor_temp', None),
-                    'outdoor_temp': getattr(app.homeforecast.thermal_model, 'current_outdoor_temp', None),
-                    'hvac_state': getattr(app.homeforecast.thermal_model, 'current_hvac_state', 'unknown')
+                    'indoor_temp': indoor_temp,
+                    'outdoor_temp': outdoor_temp,
+                    'hvac_state': hvac_state
                 }
+                logger.info(f"Final current_data: {current_data}")
+                
             except Exception as e:
                 logger.warning(f"Could not get current sensor data: {e}")
-                current_data = {}
+                current_data = {
+                    'indoor_temp': None,
+                    'outdoor_temp': None,
+                    'hvac_state': 'unknown'
+                }
             
-            return jsonify({
+            response_data = {
                 'status': 'running',
-                'version': '1.0.9',
+                'version': '1.1.3',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'current_data': current_data,
                 'model_parameters': app.homeforecast.thermal_model.get_parameters(),
@@ -63,7 +98,10 @@ def create_app(homeforecast_instance):
                     'ml_enabled': app.homeforecast.config.get('enable_ml_correction'),
                     'smart_hvac_enabled': app.homeforecast.config.is_smart_hvac_enabled()
                 }
-            })
+            }
+            
+            logger.info(f"✅ API: Returning status response: {response_data}")
+            return jsonify(response_data)
         except Exception as e:
             logger.error(f"Error in get_status: {e}")
             return jsonify({'error': str(e)}), 500

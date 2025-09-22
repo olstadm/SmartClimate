@@ -131,35 +131,52 @@ class HomeForecast:
     async def update_cycle(self):
         """Main update cycle"""
         try:
-            logger.info("Starting update cycle...")
+            logger.info("=" * 60)
+            logger.info("🔄 STARTING UPDATE CYCLE")
+            logger.info("=" * 60)
             
             # Collect current sensor data
+            logger.info("📊 Step 1: Collecting sensor data...")
             sensor_data = await self.ha_client.get_sensor_data()
+            logger.info(f"✅ Sensor data collected: {sensor_data}")
             
             # Get weather forecast
+            logger.info("🌤️ Step 2: Getting weather forecast...")
             weather_forecast = await self.ha_client.get_weather_forecast()
+            logger.info(f"✅ Weather forecast retrieved with keys: {list(weather_forecast.keys())}")
             
             # Store current data
+            logger.info("💾 Step 3: Storing measurement data...")
             await self.data_store.store_measurement(sensor_data)
+            logger.info("✅ Measurement data stored")
             
             # Update thermal model
+            logger.info("🏠 Step 4: Updating thermal model...")
             await self.thermal_model.update(sensor_data)
+            logger.info("✅ Thermal model updated")
             
             # Generate forecast
+            logger.info("🔮 Step 5: Generating forecast...")
             forecast_result = await self.forecast_engine.generate_forecast(
                 sensor_data,
                 weather_forecast
             )
+            logger.info(f"✅ Forecast generated with keys: {list(forecast_result.keys())}")
             
             # Analyze comfort and generate recommendations
+            logger.info("🏡 Step 6: Analyzing comfort...")
             comfort_analysis = await self.comfort_analyzer.analyze(
                 forecast_result
             )
+            logger.info(f"✅ Comfort analysis completed: {comfort_analysis.get('recommended_mode', 'N/A')} mode recommended")
             
             # Publish results to Home Assistant
+            logger.info("📡 Step 7: Publishing results to Home Assistant...")
             await self.publish_results(forecast_result, comfort_analysis)
+            logger.info("✅ Results published to Home Assistant")
             
-            logger.info("Update cycle complete")
+            logger.info("🎉 UPDATE CYCLE COMPLETE")
+            logger.info("=" * 60)
             
         except Exception as e:
             logger.error(f"Error in update cycle: {e}", exc_info=True)
@@ -167,8 +184,11 @@ class HomeForecast:
     async def publish_results(self, forecast_result, comfort_analysis):
         """Publish results as Home Assistant sensors"""
         try:
+            logger.info("Publishing thermal model parameters...")
             # Thermal model parameters
             params = self.thermal_model.get_parameters()
+            logger.info(f"Thermal parameters: {params}")
+            
             await self.ha_client.update_sensor(
                 'homeforecast.thermal_time_constant',
                 params['time_constant'],

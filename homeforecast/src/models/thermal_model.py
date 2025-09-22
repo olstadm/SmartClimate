@@ -127,6 +127,8 @@ class ThermalModel:
             Updated model parameters
         """
         try:
+            logger.info("🏠 Updating thermal model with sensor data...")
+            
             # Extract required values
             t_in = sensor_data['indoor_temp']
             t_out = sensor_data.get('outdoor_temp', t_in)
@@ -134,6 +136,8 @@ class ThermalModel:
             h_out = sensor_data.get('outdoor_humidity', h_in)
             hvac_state = sensor_data.get('hvac_state', 'off')
             solar = sensor_data.get('solar_irradiance', 0)
+            
+            logger.info(f"Sensor data - Indoor: {t_in}°F, Outdoor: {t_out}°F, Humidity: {h_in}%, HVAC: {hvac_state}")
             
             # Calculate time delta
             current_time = datetime.now()
@@ -176,6 +180,8 @@ class ThermalModel:
             self.current_hvac_state = hvac_state
             self.current_indoor_humidity = h_in
             self.current_outdoor_humidity = h_out
+            
+            logger.info(f"✅ Thermal model updated - stored current values: Indoor={t_in}°F, Outdoor={t_out}°F")
             
             return self.get_parameters()
             
