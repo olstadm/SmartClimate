@@ -97,8 +97,8 @@ class Config:
         
     def get_ha_url(self) -> str:
         """Get Home Assistant API URL"""
-        # When running as addon, use supervisor API
-        return "http://supervisor/core/api"
+        # When running as addon, use supervisor API to access Home Assistant
+        return "http://supervisor/core"
         
     def get_ha_token(self) -> Optional[str]:
         """Get Home Assistant access token"""
