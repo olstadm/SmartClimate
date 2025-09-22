@@ -200,6 +200,15 @@ class HomeForecastDashboard {
         // Update system information in Debug tab
         this.updateSystemInfo(status);
 
+        // Update thermal model section
+        this.updateThermalModel(status);
+
+        // Update ML performance section  
+        this.updateMLPerformance(status);
+
+        // Update thermostat configuration
+        this.updateThermostatConfiguration(status);
+
         // Update current temperature from current sensor data
         const currentTempEl = document.getElementById('currentTemp');
         if (currentTempEl && status.current_data && status.current_data.indoor_temp) {
@@ -283,8 +292,8 @@ class HomeForecastDashboard {
     updateSystemInfo(status) {
         // Update version information
         const addonVersionEl = document.getElementById('addonVersion');
-        if (addonVersionEl && status.version) {
-            addonVersionEl.textContent = status.version;
+        if (addonVersionEl && status.system_info && status.system_info.addon_version) {
+            addonVersionEl.textContent = status.system_info.addon_version;
         }
 
         // Update timezone information
@@ -295,23 +304,78 @@ class HomeForecastDashboard {
 
         // Update current local time
         const currentLocalTimeEl = document.getElementById('currentLocalTime');
-        if (currentLocalTimeEl) {
-            if (status.current_time) {
-                currentLocalTimeEl.textContent = status.current_time;
-            } else {
-                currentLocalTimeEl.textContent = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-            }
+        if (currentLocalTimeEl && status.current_time) {
+            currentLocalTimeEl.textContent = status.current_time;
         }
 
-        // Set other system info (these could come from backend later)
+        // Update Python version
         const pythonVersionEl = document.getElementById('pythonVersion');
-        if (pythonVersionEl) {
-            pythonVersionEl.textContent = '3.12'; // Could be made dynamic
+        if (pythonVersionEl && status.system_info && status.system_info.python_version) {
+            pythonVersionEl.textContent = status.system_info.python_version;
         }
 
+        // Update log level
         const logLevelEl = document.getElementById('logLevel');
-        if (logLevelEl) {
-            logLevelEl.textContent = 'INFO'; // Could be made dynamic
+        if (logLevelEl && status.system_info && status.system_info.log_level) {
+            const logLevels = {10: 'DEBUG', 20: 'INFO', 30: 'WARNING', 40: 'ERROR', 50: 'CRITICAL'};
+            logLevelEl.textContent = logLevels[status.system_info.log_level] || 'INFO';
+        }
+    }
+
+    updateThermalModel(status) {
+        // Update thermal model MAE
+        const thermalMaeEl = document.getElementById('thermalModelMae');
+        if (thermalMaeEl && status.thermal_metrics && status.thermal_metrics.mae !== null) {
+            thermalMaeEl.textContent = status.thermal_metrics.mae.toFixed(3) + '°F';
+        } else if (thermalMaeEl) {
+            thermalMaeEl.textContent = 'N/A';
+        }
+    }
+
+    updateMLPerformance(status) {
+        // Update ML model status
+        const mlStatusEl = document.getElementById('mlModelStatus');
+        if (mlStatusEl && status.ml_performance) {
+            const statusMap = {
+                'trained': 'Trained',
+                'not_trained': 'Not Trained',
+                'disabled': 'Disabled',
+                'error': 'Error'
+            };
+            mlStatusEl.textContent = statusMap[status.ml_performance.status] || 'Unknown';
+        }
+
+        // Update ML accuracy (R²)
+        const mlAccuracyEl = document.getElementById('mlModelAccuracy');
+        if (mlAccuracyEl && status.ml_performance && status.ml_performance.r2 !== null) {
+            mlAccuracyEl.textContent = (status.ml_performance.r2 * 100).toFixed(1) + '%';
+        } else if (mlAccuracyEl) {
+            mlAccuracyEl.textContent = 'N/A';
+        }
+
+        // Update training data points
+        const trainingDataEl = document.getElementById('trainingDataPoints');
+        if (trainingDataEl && status.ml_performance) {
+            trainingDataEl.textContent = status.ml_performance.training_samples || '0';
+        }
+
+        // Update last model update
+        const lastUpdateEl = document.getElementById('lastModelUpdate');
+        if (lastUpdateEl && status.ml_performance && status.ml_performance.last_update) {
+            const updateDate = new Date(status.ml_performance.last_update);
+            lastUpdateEl.textContent = updateDate.toLocaleDateString() + ' ' + updateDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        } else if (lastUpdateEl) {
+            lastUpdateEl.textContent = 'Never';
+        }
+    }
+
+    updateThermostatConfiguration(status) {
+        // Update comfort range
+        const comfortRangeEl = document.getElementById('comfortRange');
+        if (comfortRangeEl && status.config) {
+            const min = status.config.comfort_min || 62;
+            const max = status.config.comfort_max || 80;
+            comfortRangeEl.textContent = `${min}°F - ${max}°F`;
         }
     }
 
@@ -346,8 +410,13 @@ class HomeForecastDashboard {
         const chartData = {
             labels: data.timestamps.map(ts => {
                 const date = new Date(ts);
-                // If we have timezone info, could adjust here, but browser handles local time conversion
-                return date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                // Convert to local time for display - the browser will handle timezone conversion
+                // but we ensure the format is consistent
+                return date.toLocaleTimeString([], {
+                    hour: '2-digit', 
+                    minute:'2-digit',
+                    hour12: false  // Use 24-hour format for consistency
+                });
             }),
             datasets: [
                 {
@@ -423,7 +492,9 @@ class HomeForecastDashboard {
                         title: function(tooltipItems) {
                             const index = tooltipItems[0].dataIndex;
                             const timestamp = data.timestamps[index];
-                            return new Date(timestamp).toLocaleString();
+                            const date = new Date(timestamp);
+                            return date.toLocaleDateString() + ' ' + 
+                                   date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: false});
                         },
                         label: function(context) {
                             let label = context.dataset.label || '';
@@ -923,6 +994,42 @@ class HomeForecastDashboard {
             notification.classList.remove('show');
             setTimeout(() => notification.remove(), 300);
         }, 5000);
+    }
+
+    async resetModel() {
+        if (!confirm('Are you sure you want to reset the model and clear all historical data? This cannot be undone.')) {
+            return;
+        }
+
+        try {
+            this.showNotification('Resetting model and clearing data...', 'info');
+            
+            const response = await fetch('/api/model/reset', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const result = await response.json();
+            
+            if (response.ok && result.success) {
+                this.showNotification('Model reset successfully! Starting fresh data collection...', 'success');
+                // Refresh the dashboard after a short delay
+                setTimeout(() => {
+                    window.location.reload();
+                }, 2000);
+            } else {
+                throw new Error(result.error || 'Reset failed');
+            }
+        } catch (error) {
+            this.showNotification('Failed to reset model: ' + error.message, 'error');
+        }
+    }
+
+    exportData() {
+        // Placeholder for data export functionality
+        this.showNotification('Export functionality coming soon...', 'info');
     }
 
     startAutoRefresh() {

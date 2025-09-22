@@ -8,6 +8,17 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional
 import copy
 
+try:
+    import pytz
+    HAS_PYTZ = True
+except ImportError:
+    HAS_PYTZ = False
+    try:
+        import zoneinfo
+        HAS_ZONEINFO = True
+    except ImportError:
+        HAS_ZONEINFO = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,7 +43,7 @@ class ForecastEngine:
         self.comfort_max = config.get('comfort_max_temp', 24.0)
         self.control_deadband = 0.5  # °C hysteresis
         
-    async def generate_forecast(self, current_data: Dict, weather_forecast: Dict) -> Dict:
+    async def generate_forecast(self, current_data: Dict, weather_forecast: Dict, timezone_name: str = 'UTC') -> Dict:
         """
         Generate temperature forecast for next 12 hours
         
@@ -67,7 +78,7 @@ class ForecastEngine:
             
             # Prepare outdoor conditions series
             logger.info("Preparing outdoor conditions series...")
-            outdoor_series = self._prepare_outdoor_series(current_data, weather_forecast)
+            outdoor_series = self._prepare_outdoor_series(current_data, weather_forecast, timezone_name)
             logger.info(f"Generated outdoor series with {len(outdoor_series)} points")
             if outdoor_series:
                 logger.info(f"First outdoor point: {outdoor_series[0]['outdoor_temp']}°F at {outdoor_series[0]['timestamp']}")
@@ -119,7 +130,7 @@ class ForecastEngine:
             logger.error(f"Error generating forecast: {e}", exc_info=True)
             raise
             
-    def _prepare_outdoor_series(self, current_data: Dict, weather_forecast: Dict) -> List[Dict]:
+    def _prepare_outdoor_series(self, current_data: Dict, weather_forecast: Dict, timezone_name: str = 'UTC') -> List[Dict]:
         """Prepare outdoor conditions time series"""
         logger.info("=== Preparing Outdoor Conditions Series ===")
         series = []
@@ -145,8 +156,21 @@ class ForecastEngine:
         else:
             logger.info(f"Using local sensor outdoor humidity: {current_outdoor_humidity}%")
             
-        # Start with current conditions
-        current_time = datetime.now()
+        # Start with current conditions in local timezone
+        try:
+            if timezone_name != 'UTC' and HAS_PYTZ:
+                tz = pytz.timezone(timezone_name)
+                current_time = datetime.now(tz)
+            elif timezone_name != 'UTC' and HAS_ZONEINFO:
+                import zoneinfo
+                tz = zoneinfo.ZoneInfo(timezone_name)
+                current_time = datetime.now(tz)
+            else:
+                current_time = datetime.now()
+            logger.info(f"Using timezone {timezone_name} for forecast timestamps, current time: {current_time}")
+        except Exception as e:
+            logger.warning(f"Could not set timezone {timezone_name}, using UTC: {e}")
+            current_time = datetime.now()
         
         # Build series from forecast
         forecast_data = weather_forecast.get('hourly_forecast', [])

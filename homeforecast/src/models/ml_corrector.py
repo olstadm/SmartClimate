@@ -312,6 +312,24 @@ class MLCorrector:
         except Exception as e:
             logger.error(f"Error loading ML model: {e}", exc_info=True)
             
+    def reset_model(self):
+        """Reset ML corrector to initial state"""
+        logger.info("Resetting ML correction model...")
+        
+        # Clear model and state
+        self.model = None
+        self.scaler = None
+        self.is_trained = False
+        self.performance_history = []
+        
+        # Remove saved model file
+        model_path = self.data_store.models_dir / f"{self.model_type}_correction.pkl"
+        if model_path.exists():
+            model_path.unlink()
+            logger.info(f"Removed saved model file: {model_path}")
+        
+        logger.info("ML correction model reset complete")
+
     def get_model_info(self) -> Dict:
         """Get information about the current model"""
         info = {

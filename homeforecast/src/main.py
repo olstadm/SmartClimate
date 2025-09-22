@@ -167,7 +167,8 @@ class HomeForecast:
             logger.info("🔮 Step 5: Generating forecast...")
             forecast_result = await self.forecast_engine.generate_forecast(
                 sensor_data,
-                weather_forecast
+                weather_forecast,
+                getattr(self, 'timezone', 'UTC')
             )
             logger.info(f"✅ Forecast generated with keys: {list(forecast_result.keys())}")
             

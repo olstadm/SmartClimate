@@ -33,19 +33,14 @@ def convert_numpy_types(obj):
 
 
 def calculate_climate_insights(current_data, thermostat_data, config, comfort_analyzer=None):
-    """Calculate climate action insights for dashboard"""
+    """Calculate intelligent climate action insights with HVAC timing predictions"""
     try:
         insights = {
-            'recommended_action': 'NONE',
-            'action_off_time': None,
-            'next_action_time': None,
-            'estimated_runtime': None
+            'recommended_action': 'MONITOR',
+            'action_off_time': 'N/A',
+            'next_action_time': 'N/A',
+            'estimated_runtime': 'N/A'
         }
-        
-        # Get timezone from HA client if available
-        timezone_name = 'UTC'
-        if hasattr(comfort_analyzer, 'homeforecast') and hasattr(comfort_analyzer.homeforecast, 'timezone'):
-            timezone_name = comfort_analyzer.homeforecast.timezone
         
         # Get current conditions
         current_temp = current_data.get('indoor_temp', 70.0)
@@ -53,53 +48,113 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
         hvac_mode = thermostat_data.get('hvac_mode', 'off')
         hvac_action = thermostat_data.get('hvac_action', 'idle')
         
-        comfort_min = config.get('comfort_min_temp', 68.0)
-        comfort_max = config.get('comfort_max_temp', 74.0)
+        # Use actual comfort range from config  
+        comfort_min = config.get('comfort_min_temp', 62.0)
+        comfort_max = config.get('comfort_max_temp', 80.0)
+        
+        # HVAC performance estimates (°F/hour)
+        heating_rate = 3.5
+        cooling_rate = 4.0
+        drift_rate = 0.5  # Natural temperature drift when HVAC is off
         
         logger.info(f"Climate insights calculation - Current: {current_temp}°F, Target: {target_temp}°F, " +
-                   f"Mode: {hvac_mode}, Action: {hvac_action}")
+                   f"Mode: {hvac_mode}, Action: {hvac_action}, Comfort: {comfort_min}-{comfort_max}°F")
         
-        # Determine recommended action based on current conditions
-        if hvac_mode == 'off':
-            insights['recommended_action'] = 'OFF'
-        elif hvac_action in ['heating', 'heat']:
+        now = datetime.now()
+        
+        # HVAC is actively heating
+        if hvac_action in ['heating', 'heat'] or (hvac_mode == 'heat' and hvac_action != 'idle'):
             insights['recommended_action'] = 'HEATING'
-            # Estimate when heating will stop (when target temp is reached)
+            
+            # Calculate when to turn off heating (when target reached)
             if current_temp < target_temp:
                 temp_diff = target_temp - current_temp
-                heating_rate = 3.5  # °F/hour (default estimate)
                 runtime_hours = temp_diff / heating_rate
                 insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
-                off_time = datetime.now() + timedelta(hours=runtime_hours)
+                off_time = now + timedelta(hours=runtime_hours)
                 insights['action_off_time'] = off_time.strftime("%H:%M")
-        elif hvac_action in ['cooling', 'cool']:
+                
+                # Predict next heating cycle (when temp drops to comfort_min)
+                temp_after_off = target_temp
+                for hour in range(1, 13):  # Check next 12 hours
+                    temp_after_off -= drift_rate
+                    if temp_after_off <= comfort_min:
+                        next_heat_time = off_time + timedelta(hours=hour-0.5)  # Start early
+                        insights['next_action_time'] = next_heat_time.strftime("%H:%M")
+                        break
+            else:
+                insights['action_off_time'] = "Now"
+                
+        # HVAC is actively cooling  
+        elif hvac_action in ['cooling', 'cool'] or (hvac_mode == 'cool' and hvac_action != 'idle'):
             insights['recommended_action'] = 'COOLING'
-            # Estimate when cooling will stop (when target temp is reached)
+            
+            # Calculate when to turn off cooling (when target reached)
             if current_temp > target_temp:
                 temp_diff = current_temp - target_temp
-                cooling_rate = 4.0  # °F/hour (default estimate)
                 runtime_hours = temp_diff / cooling_rate
                 insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
-                off_time = datetime.now() + timedelta(hours=runtime_hours)
+                off_time = now + timedelta(hours=runtime_hours)
                 insights['action_off_time'] = off_time.strftime("%H:%M")
-        elif hvac_mode == 'heat' and current_temp < comfort_min:
-            insights['recommended_action'] = 'HEAT'
-            # Calculate when to start heating to maintain comfort
-            temp_deficit = comfort_min - current_temp
-            if temp_deficit > 1.0:  # Need heating soon
+                
+                # Predict next cooling cycle (when temp rises to comfort_max)
+                temp_after_off = target_temp
+                for hour in range(1, 13):  # Check next 12 hours
+                    temp_after_off += drift_rate
+                    if temp_after_off >= comfort_max:
+                        next_cool_time = off_time + timedelta(hours=hour-0.5)  # Start early
+                        insights['next_action_time'] = next_cool_time.strftime("%H:%M")
+                        break
+            else:
+                insights['action_off_time'] = "Now"
+                
+        # HVAC is off or idle - predict when to start
+        elif hvac_mode == 'off' or hvac_action == 'idle':
+            
+            # Currently outside comfort range - recommend immediate action
+            if current_temp < comfort_min and hvac_mode in ['heat', 'heat_cool', 'auto']:
+                insights['recommended_action'] = 'HEAT NOW'
+                insights['next_action_time'] = "Now"
+            elif current_temp > comfort_max and hvac_mode in ['cool', 'heat_cool', 'auto']:
+                insights['recommended_action'] = 'COOL NOW'
                 insights['next_action_time'] = "Now"
             else:
-                insights['next_action_time'] = "15 min"
-        elif hvac_mode == 'cool' and current_temp > comfort_max:
-            insights['recommended_action'] = 'COOL'
-            # Calculate when to start cooling to maintain comfort
-            temp_excess = current_temp - comfort_max
-            if temp_excess > 1.0:  # Need cooling soon
-                insights['next_action_time'] = "Now"
-            else:
-                insights['next_action_time'] = "15 min"
-        else:
-            insights['recommended_action'] = 'MONITOR'
+                insights['recommended_action'] = 'OFF'
+                
+                # Predict when heating will be needed
+                if hvac_mode in ['heat', 'heat_cool', 'auto']:
+                    temp_prediction = current_temp
+                    for hour in range(1, 13):  # Check next 12 hours
+                        temp_prediction -= drift_rate
+                        if temp_prediction <= comfort_min:
+                            heat_start_time = now + timedelta(hours=max(0, hour-1))
+                            insights['next_action_time'] = heat_start_time.strftime("%H:%M")
+                            break
+                            
+                # Predict when cooling will be needed
+                elif hvac_mode in ['cool', 'heat_cool', 'auto']:
+                    temp_prediction = current_temp
+                    for hour in range(1, 13):  # Check next 12 hours
+                        temp_prediction += drift_rate
+                        if temp_prediction >= comfort_max:
+                            cool_start_time = now + timedelta(hours=max(0, hour-1))
+                            insights['next_action_time'] = cool_start_time.strftime("%H:%M")
+                            break
+        
+        # Format times based on timezone if available
+        if hasattr(comfort_analyzer, 'homeforecast') and hasattr(comfort_analyzer.homeforecast, 'ha_client'):
+            try:
+                if insights['action_off_time'] not in ['N/A', 'Now']:
+                    off_dt = datetime.strptime(insights['action_off_time'], "%H:%M").replace(
+                        year=now.year, month=now.month, day=now.day)
+                    insights['action_off_time'] = comfort_analyzer.homeforecast.ha_client.format_time_for_display(off_dt)
+                    
+                if insights['next_action_time'] not in ['N/A', 'Now']:
+                    next_dt = datetime.strptime(insights['next_action_time'], "%H:%M").replace(
+                        year=now.year, month=now.month, day=now.day)
+                    insights['next_action_time'] = comfort_analyzer.homeforecast.ha_client.format_time_for_display(next_dt)
+            except Exception as e:
+                logger.warning(f"Could not format times with timezone: {e}")
         
         logger.info(f"Climate insights result: {insights}")
         return insights
@@ -108,9 +163,9 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
         logger.error(f"Error calculating climate insights: {e}")
         return {
             'recommended_action': 'UNKNOWN',
-            'action_off_time': None,
-            'next_action_time': None,
-            'estimated_runtime': None
+            'action_off_time': 'N/A',
+            'next_action_time': 'N/A',
+            'estimated_runtime': 'N/A'
         }
 
 
@@ -212,17 +267,85 @@ def create_app(homeforecast_instance):
                 else:
                     last_update_str = app.homeforecast.thermal_model.last_update.strftime("%m/%d %H:%M")
 
+            # Get ML model performance data
+            ml_performance = {}
+            try:
+                if (hasattr(app.homeforecast.thermal_model, 'ml_corrector') and 
+                    app.homeforecast.thermal_model.ml_corrector and
+                    hasattr(app.homeforecast.thermal_model.ml_corrector, 'performance_history') and
+                    app.homeforecast.thermal_model.ml_corrector.performance_history):
+                    
+                    latest_perf = app.homeforecast.thermal_model.ml_corrector.performance_history[-1]
+                    ml_performance = {
+                        'status': 'trained' if app.homeforecast.thermal_model.ml_corrector.is_trained else 'not_trained',
+                        'mae': round(latest_perf.get('mae', 0), 3),
+                        'r2': round(latest_perf.get('r2', 0), 3),
+                        'training_samples': latest_perf.get('training_samples', 0),
+                        'last_update': latest_perf.get('timestamp').isoformat() if latest_perf.get('timestamp') else None
+                    }
+                else:
+                    ml_performance = {
+                        'status': 'disabled' if not app.homeforecast.config.get('enable_ml_correction') else 'not_trained',
+                        'mae': None,
+                        'r2': None,
+                        'training_samples': 0,
+                        'last_update': None
+                    }
+            except Exception as e:
+                logger.warning(f"Could not get ML performance data: {e}")
+                ml_performance = {
+                    'status': 'error',
+                    'mae': None,
+                    'r2': None,
+                    'training_samples': 0,
+                    'last_update': None
+                }
+
+            # Get thermal model quality metrics
+            thermal_metrics = {}
+            try:
+                thermal_metrics = app.homeforecast.thermal_model.get_model_quality_metrics()
+            except Exception as e:
+                logger.warning(f"Could not get thermal model metrics: {e}")
+                thermal_metrics = {
+                    'mae': None,
+                    'sample_size': 0
+                }
+
+            # Get system information
+            import sys
+            import platform
+            system_info = {
+                'addon_version': '1.5.0',
+                'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+                'platform': platform.system(),
+                'log_level': logging.getLogger().getEffectiveLevel()
+            }
+
+            # Format current local time
+            current_local_time = "N/A"
+            try:
+                if hasattr(app.homeforecast, 'ha_client'):
+                    current_local_time = app.homeforecast.ha_client.format_time_for_display(datetime.now())
+                else:
+                    current_local_time = datetime.now().strftime("%H:%M")
+            except Exception as e:
+                logger.warning(f"Could not format current time: {e}")
+
             response_data = {
                 'status': 'running',
-                'version': '1.3.0',
+                'version': '1.5.0',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
-                'current_time': datetime.now().strftime("%H:%M"),
+                'current_time': current_local_time,
                 'current_data': current_data,
                 'thermostat_data': thermostat_data,
                 'climate_insights': climate_insights,
                 'model_parameters': app.homeforecast.thermal_model.get_parameters(),
+                'thermal_metrics': thermal_metrics,
+                'ml_performance': ml_performance,
+                'system_info': system_info,
                 'config': {
                     'comfort_min': app.homeforecast.config.get('comfort_min_temp'),
                     'comfort_max': app.homeforecast.config.get('comfort_max_temp'),
@@ -423,6 +546,37 @@ def create_app(homeforecast_instance):
             
         except Exception as e:
             logger.error(f"Error getting statistics: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/model/reset', methods=['POST'])
+    def reset_model():
+        """Reset the thermal model and clear historical data"""
+        try:
+            logger.info("🌐 API: Processing /api/model/reset request")
+            
+            # Run async function in sync context
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # Clear database tables
+            loop.run_until_complete(app.homeforecast.data_store.clear_all_data())
+            
+            # Reset thermal model
+            app.homeforecast.thermal_model.reset_model()
+            
+            # Reset ML corrector if available
+            if (hasattr(app.homeforecast.thermal_model, 'ml_corrector') and 
+                app.homeforecast.thermal_model.ml_corrector):
+                app.homeforecast.thermal_model.ml_corrector.reset_model()
+            
+            logger.info("✅ API: Model reset complete")
+            return jsonify({
+                'success': True,
+                'message': 'Model and historical data have been reset'
+            })
+            
+        except Exception as e:
+            logger.error(f"Error resetting model: {e}")
             return jsonify({'error': str(e)}), 500
             
     # Web UI Routes

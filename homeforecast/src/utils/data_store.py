@@ -361,6 +361,30 @@ class DataStore:
             logger.error(f"Error getting latest forecast: {e}")
             return None
             
+    async def clear_all_data(self):
+        """Clear all historical data from the database"""
+        try:
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                
+                # Clear all tables
+                cursor.execute("DELETE FROM measurements")
+                cursor.execute("DELETE FROM forecasts")
+                cursor.execute("DELETE FROM model_parameters")
+                
+                # Reset sqlite sequence counters
+                cursor.execute("DELETE FROM sqlite_sequence WHERE name IN ('measurements', 'forecasts', 'model_parameters')")
+                
+                conn.commit()
+                conn.close()
+                
+                logger.info("All historical data cleared from database")
+                
+        except Exception as e:
+            logger.error(f"Error clearing database: {e}")
+            raise
+
     async def close(self):
         """Close database connection"""
         # No persistent connections - each method creates its own

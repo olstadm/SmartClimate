@@ -376,3 +376,27 @@ class ThermalModel:
         
         # Parameters considered converged if std < 0.01
         return np.all(param_std < 0.01)
+    
+    def reset_model(self):
+        """Reset thermal model to initial state"""
+        logger.info("Resetting thermal model...")
+        
+        # Clear history
+        self.parameter_history = []
+        
+        # Reset state variables
+        self.last_temp_in = None
+        self.last_update = None
+        self.current_indoor_temp = None
+        self.current_outdoor_temp = None
+        self.current_hvac_state = 'unknown'
+        
+        # Reinitialize RLS with default parameters
+        self.rls = RecursiveLeastSquares(n_params=6, forgetting_factor=0.99)
+        self._set_default_parameters()
+        
+        # Reset ML corrector if available
+        if self.ml_corrector:
+            self.ml_corrector.reset_model()
+            
+        logger.info("Thermal model reset complete")
