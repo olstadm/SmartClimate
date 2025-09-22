@@ -43,10 +43,22 @@ class HomeForecastDashboard {
             // Show loading indicators
             this.showLoading(true);
 
-            // Fetch required data (status, parameters, statistics)
-            const statusPromise = this.fetchStatus();
-            const parametersPromise = this.fetchModelParameters();
-            const statisticsPromise = this.fetchStatistics();
+            // Fetch data with individual error handling to prevent one failed API from breaking everything
+            const statusPromise = this.fetchStatus().catch(e => {
+                console.error('Status API failed:', e);
+                this.showError('Status data unavailable');
+                return null;
+            });
+            const parametersPromise = this.fetchModelParameters().catch(e => {
+                console.error('Parameters API failed:', e);
+                this.showError('Model parameters unavailable');
+                return null;
+            });
+            const statisticsPromise = this.fetchStatistics().catch(e => {
+                console.error('Statistics API failed:', e);
+                this.showError('Statistics unavailable');
+                return null;
+            });
 
             // Fetch optional data (forecast, comfort analysis)
             const forecastPromise = this.fetchForecast().catch(e => {
@@ -70,10 +82,39 @@ class HomeForecastDashboard {
             // Update UI with fetched data
             console.log('API responses:', { status, forecast, comfort, parameters, statistics });
             
-            // Update each section individually with error handling
-            try { this.updateStatus(status); } catch (e) { console.error('Error updating status:', e); }
-            try { this.updateParameters(parameters); } catch (e) { console.error('Error updating parameters:', e); }
-            try { this.updateStatistics(statistics); } catch (e) { console.error('Error updating statistics:', e); }
+            // Update each section individually with error handling and fallback displays
+            if (status) {
+                try { 
+                    this.updateStatus(status); 
+                } catch (e) { 
+                    console.error('Error updating status:', e);
+                    this.showDataError('status', 'Status display error');
+                }
+            } else {
+                this.showDataError('status', 'Status unavailable');
+            }
+            
+            if (parameters) {
+                try { 
+                    this.updateParameters(parameters); 
+                } catch (e) { 
+                    console.error('Error updating parameters:', e);
+                    this.showDataError('parameters', 'Parameters display error');
+                }
+            } else {
+                this.showDataError('parameters', 'Parameters unavailable');
+            }
+            
+            if (statistics) {
+                try { 
+                    this.updateStatistics(statistics); 
+                } catch (e) { 
+                    console.error('Error updating statistics:', e);
+                    this.showDataError('statistics', 'Statistics display error');
+                }
+            } else {
+                this.showDataError('statistics', 'Statistics unavailable');
+            }
             
             if (forecast) {
                 try { this.updateForecast(forecast); } catch (e) { console.error('Error updating forecast:', e); }
@@ -974,6 +1015,26 @@ class HomeForecastDashboard {
     }
 
     showError(message) {
+        this.showNotification(message, 'error');
+    }
+
+    showDataError(section, message) {
+        // Find elements that should show error state instead of spinners
+        const selectorMap = {
+            'status': '.status-section .metric-value, .current-data .metric-value',
+            'parameters': '.model-section .metric-value',
+            'statistics': '.stats-section .metric-value'
+        };
+        
+        const selector = selectorMap[section];
+        if (selector) {
+            document.querySelectorAll(selector).forEach(el => {
+                el.classList.remove('loading');
+                el.innerHTML = '<span class="error-state">N/A</span>';
+            });
+        }
+        
+        // Show notification
         this.showNotification(message, 'error');
     }
 

@@ -20,16 +20,64 @@ logger = logging.getLogger(__name__)
 
 
 def convert_numpy_types(obj):
-    """Convert numpy types to native Python types for JSON serialization"""
+    """Convert numpy types and other problematic types to native Python types for JSON serialization"""
+    import datetime
+    
+    # Handle None values
+    if obj is None:
+        return None
+    
+    # Handle numpy types
     if hasattr(obj, 'item'):  # numpy scalar
         return obj.item()
-    elif isinstance(obj, dict):
-        return {k: convert_numpy_types(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [convert_numpy_types(v) for v in obj]
     elif HAS_NUMPY and isinstance(obj, np.ndarray):
         return obj.tolist()
-    return obj
+    elif HAS_NUMPY and isinstance(obj, (np.bool_, np.bool8)):
+        return bool(obj)
+    elif HAS_NUMPY and isinstance(obj, (np.int_, np.intc, np.intp, np.int8, np.int16, np.int32, np.int64)):
+        return int(obj)
+    elif HAS_NUMPY and isinstance(obj, (np.float_, np.float16, np.float32, np.float64)):
+        return float(obj)
+    
+    # Handle Python boolean explicitly
+    elif isinstance(obj, (bool, type(True), type(False))):
+        return bool(obj)
+    
+    # Handle datetime objects
+    elif isinstance(obj, datetime.datetime):
+        return obj.isoformat()
+    elif isinstance(obj, datetime.date):
+        return obj.isoformat()
+    elif isinstance(obj, datetime.time):
+        return obj.isoformat()
+    
+    # Handle complex data structures
+    elif isinstance(obj, dict):
+        return {k: convert_numpy_types(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [convert_numpy_types(v) for v in obj]
+    elif isinstance(obj, set):
+        return [convert_numpy_types(v) for v in obj]
+    
+    # Handle other numeric types that might cause issues
+    elif hasattr(obj, '__int__') and not isinstance(obj, str):
+        try:
+            return int(obj)
+        except (ValueError, TypeError):
+            pass
+    elif hasattr(obj, '__float__') and not isinstance(obj, str):
+        try:
+            return float(obj)
+        except (ValueError, TypeError):
+            pass
+    
+    # For anything else, convert to string if it's not JSON serializable
+    try:
+        import json
+        json.dumps(obj)  # Test if it's serializable
+        return obj
+    except (TypeError, ValueError):
+        return str(obj)
 
 
 def calculate_climate_insights(current_data, thermostat_data, config, comfort_analyzer=None):
@@ -316,7 +364,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '1.5.1',
+                'addon_version': '1.6.1',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -334,7 +382,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '1.5.1',
+                'version': '1.6.1',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
@@ -355,7 +403,14 @@ def create_app(homeforecast_instance):
                 }
             }
             
-            logger.info(f"✅ API: Returning status response: {response_data}")
+            # Convert all data to JSON-serializable types
+            try:
+                response_data = convert_numpy_types(response_data)
+                logger.info(f"✅ API: Data converted for JSON serialization")
+            except Exception as conv_error:
+                logger.warning(f"⚠️ Data conversion warning: {conv_error}")
+            
+            logger.info(f"✅ API: Returning status response with {len(response_data)} keys")
             return jsonify(response_data)
         except Exception as e:
             logger.error(f"Error in get_status: {e}")
@@ -393,6 +448,8 @@ def create_app(homeforecast_instance):
                         forecast['chart_data'] = chart_data
                         logger.info(f"Added chart data with {len(chart_data['timestamps'])} points")
                 
+                # Convert all data to JSON-serializable types
+                forecast = convert_numpy_types(forecast)
                 logger.info(f"✅ API: Returning forecast data")
                 return jsonify(forecast)
             else:
@@ -416,11 +473,15 @@ def create_app(homeforecast_instance):
                 app.homeforecast.data_store.get_recent_measurements(hours)
             )
             
-            return jsonify({
+            response_data = {
                 'measurements': measurements,
                 'count': len(measurements),
                 'hours': hours
-            })
+            }
+            
+            # Convert all data to JSON-serializable types
+            response_data = convert_numpy_types(response_data)
+            return jsonify(response_data)
             
         except Exception as e:
             logger.error(f"Error getting measurements: {e}")
@@ -540,6 +601,9 @@ def create_app(homeforecast_instance):
                 'database': db_stats,
                 'model': model_stats
             }
+            
+            # Convert all data to JSON-serializable types
+            response_data = convert_numpy_types(response_data)
             
             logger.info(f"✅ API: Returning statistics: {response_data}")
             return jsonify(response_data)

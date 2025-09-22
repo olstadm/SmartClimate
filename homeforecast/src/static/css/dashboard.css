@@ -395,6 +395,17 @@ body {
     100% { transform: rotate(360deg); }
 }
 
+/* Error States */
+.error-state {
+    color: var(--danger-color);
+    font-style: italic;
+    opacity: 0.8;
+}
+
+.metric-value.loading {
+    opacity: 0.7;
+}
+
 /* Tooltips */
 .tooltip {
     position: relative;
