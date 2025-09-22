@@ -28,7 +28,9 @@ class HomeAssistantClient:
     async def connect(self):
         """Establish connection to Home Assistant"""
         try:
-            self.session = aiohttp.ClientSession()
+            # Create session with timeout configuration
+            timeout = aiohttp.ClientTimeout(total=30)
+            self.session = aiohttp.ClientSession(timeout=timeout)
             
             logger.info(f"Connecting to Home Assistant at {self.base_url}")
             logger.debug(f"Using token: {'***' + self.token[-4:] if self.token and len(self.token) > 4 else 'No token'}")

@@ -7,6 +7,7 @@ import logging
 import os
 import sqlite3
 import asyncio
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from pathlib import Path
@@ -23,7 +24,7 @@ class DataStore:
         self.data_dir = Path("/data/homeforecast")
         self.db_path = self.data_dir / "homeforecast.db"
         self.models_dir = self.data_dir / "models"
-        self.conn = None
+        self._lock = threading.Lock()
         
     async def initialize(self):
         """Initialize data storage"""
@@ -41,13 +42,18 @@ class DataStore:
             logger.error(f"Error initializing data store: {e}")
             raise
             
+    def _get_connection(self):
+        """Get thread-local database connection"""
+        conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
+    
     async def _init_database(self):
         """Initialize SQLite database"""
-        self.conn = sqlite3.connect(str(self.db_path))
-        self.conn.row_factory = sqlite3.Row
+        conn = self._get_connection()
         
         # Create tables
-        cursor = self.conn.cursor()
+        cursor = conn.cursor()
         
         # Sensor measurements table
         cursor.execute("""
@@ -91,62 +97,76 @@ class DataStore:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_measurements_timestamp ON measurements(timestamp)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_forecasts_timestamp ON forecasts(timestamp)")
         
-        self.conn.commit()
+        conn.commit()
+        conn.close()
         
     async def store_measurement(self, sensor_data: Dict):
         """Store a sensor measurement"""
         try:
-            cursor = self.conn.cursor()
-            
-            cursor.execute("""
-                INSERT INTO measurements (
-                    timestamp, indoor_temp, outdoor_temp,
-                    indoor_humidity, outdoor_humidity,
-                    hvac_state, solar_irradiance
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                sensor_data['timestamp'],
-                sensor_data.get('indoor_temp'),
-                sensor_data.get('outdoor_temp'),
-                sensor_data.get('indoor_humidity'),
-                sensor_data.get('outdoor_humidity'),
-                sensor_data.get('hvac_state'),
-                sensor_data.get('solar_irradiance')
-            ))
-            
-            self.conn.commit()
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    INSERT INTO measurements (
+                        timestamp, indoor_temp, outdoor_temp,
+                        indoor_humidity, outdoor_humidity,
+                        hvac_state, solar_irradiance
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    sensor_data['timestamp'],
+                    sensor_data.get('indoor_temp'),
+                    sensor_data.get('outdoor_temp'),
+                    sensor_data.get('indoor_humidity'),
+                    sensor_data.get('outdoor_humidity'),
+                    sensor_data.get('hvac_state'),
+                    sensor_data.get('solar_irradiance')
+                ))
+                
+                conn.commit()
+                conn.close()
             
         except Exception as e:
             logger.error(f"Error storing measurement: {e}")
             
+    def _serialize_datetime(self, obj):
+        """Custom datetime serializer"""
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        raise TypeError(f"Object {obj} is not JSON serializable")
+    
     async def store_forecast(self, forecast_result: Dict):
         """Store a forecast result"""
         try:
-            cursor = self.conn.cursor()
-            
-            # Convert forecast data to JSON
-            forecast_json = json.dumps({
-                'indoor_forecast': forecast_result.get('indoor_forecast', []),
-                'outdoor_forecast': forecast_result.get('outdoor_forecast', []),
-                'idle_trajectory': forecast_result.get('idle_trajectory', []),
-                'controlled_trajectory': forecast_result.get('controlled_trajectory', []),
-                'timestamps': [dt.isoformat() if hasattr(dt, 'isoformat') else str(dt) 
-                              for dt in forecast_result.get('timestamps', [])]
-            })
-            
-            # Store accuracy metrics if available
-            accuracy_json = json.dumps(forecast_result.get('accuracy_metrics', {}))
-            
-            cursor.execute("""
-                INSERT INTO forecasts (timestamp, forecast_data, accuracy_metrics)
-                VALUES (?, ?, ?)
-            """, (
-                datetime.now(),
-                forecast_json,
-                accuracy_json
-            ))
-            
-            self.conn.commit()
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                
+                # Convert forecast data to JSON with proper datetime handling
+                forecast_data = {
+                    'indoor_forecast': forecast_result.get('indoor_forecast', []),
+                    'outdoor_forecast': forecast_result.get('outdoor_forecast', []),
+                    'idle_trajectory': forecast_result.get('idle_trajectory', []),
+                    'controlled_trajectory': forecast_result.get('controlled_trajectory', []),
+                    'timestamps': [dt.isoformat() if isinstance(dt, datetime) else str(dt) 
+                                  for dt in forecast_result.get('timestamps', [])]
+                }
+                forecast_json = json.dumps(forecast_data, default=self._serialize_datetime)
+                
+                # Store accuracy metrics if available
+                accuracy_json = json.dumps(forecast_result.get('accuracy_metrics', {}), default=self._serialize_datetime)
+                
+                cursor.execute("""
+                    INSERT INTO forecasts (timestamp, forecast_data, accuracy_metrics)
+                    VALUES (?, ?, ?)
+                """, (
+                    datetime.now().isoformat(),
+                    forecast_json,
+                    accuracy_json
+                ))
+                
+                conn.commit()
+                conn.close()
             
         except Exception as e:
             logger.error(f"Error storing forecast: {e}")
@@ -300,23 +320,26 @@ class DataStore:
     async def get_latest_forecast(self) -> Optional[Dict]:
         """Get the most recent forecast"""
         try:
-            cursor = self.conn.cursor()
-            
-            cursor.execute("""
-                SELECT * FROM forecasts
-                ORDER BY timestamp DESC
-                LIMIT 1
-            """)
-            
-            row = cursor.fetchone()
-            
-            if row:
-                forecast_data = json.loads(row['forecast_data'])
-                return {
-                    'timestamp': row['timestamp'],
-                    'data': forecast_data,
-                    'accuracy_metrics': json.loads(row['accuracy_metrics'] or '{}')
-                }
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT * FROM forecasts
+                    ORDER BY timestamp DESC
+                    LIMIT 1
+                """)
+                
+                row = cursor.fetchone()
+                conn.close()
+                
+                if row:
+                    forecast_data = json.loads(row['forecast_data'])
+                    return {
+                        'timestamp': row['timestamp'],
+                        'data': forecast_data,
+                        'accuracy_metrics': json.loads(row['accuracy_metrics'] or '{}')
+                    }
                 
             return None
             
@@ -326,34 +349,38 @@ class DataStore:
             
     async def close(self):
         """Close database connection"""
-        if self.conn:
-            self.conn.close()
+        # No persistent connections - each method creates its own
+        pass
             
     def get_statistics(self) -> Dict:
         """Get database statistics"""
         try:
-            cursor = self.conn.cursor()
-            
-            stats = {}
-            
-            # Count measurements
-            cursor.execute("SELECT COUNT(*) as count FROM measurements")
-            stats['measurements_count'] = cursor.fetchone()['count']
-            
-            # Count forecasts
-            cursor.execute("SELECT COUNT(*) as count FROM forecasts")
-            stats['forecasts_count'] = cursor.fetchone()['count']
-            
-            # Get date range
-            cursor.execute("""
-                SELECT MIN(timestamp) as min_date, MAX(timestamp) as max_date
-                FROM measurements
-            """)
-            row = cursor.fetchone()
-            stats['data_range'] = {
-                'start': row['min_date'],
-                'end': row['max_date']
-            }
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                
+                stats = {}
+                
+                # Count measurements
+                cursor.execute("SELECT COUNT(*) as count FROM measurements")
+                stats['measurements_count'] = cursor.fetchone()['count']
+                
+                # Count forecasts
+                cursor.execute("SELECT COUNT(*) as count FROM forecasts")
+                stats['forecasts_count'] = cursor.fetchone()['count']
+                
+                # Get date range
+                cursor.execute("""
+                    SELECT MIN(timestamp) as min_date, MAX(timestamp) as max_date
+                    FROM measurements
+                """)
+                row = cursor.fetchone()
+                stats['data_range'] = {
+                    'start': row['min_date'],
+                    'end': row['max_date']
+                }
+                
+                conn.close()
             
             return stats
             
