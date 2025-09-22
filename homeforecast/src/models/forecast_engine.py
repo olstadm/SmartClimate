@@ -144,6 +144,19 @@ class ForecastEngine:
             # Extract key results with extended timeline
             timestamps = [step['timestamp'] for step in idle_trajectory]
             
+            # Log trajectory data for debugging
+            logger.info(f"Trajectory generation complete:")
+            logger.info(f"  - Idle trajectory: {len(idle_trajectory)} points")
+            logger.info(f"  - Controlled trajectory: {len(controlled_trajectory)} points")  
+            logger.info(f"  - Current trajectory: {len(current_trajectory)} points")
+            logger.info(f"  - Outdoor series: {len(outdoor_series)} points")
+            logger.info(f"  - Timestamps: {len(timestamps)} points")
+            
+            if idle_trajectory:
+                logger.info(f"  - Idle temp range: {min(s['indoor_temp'] for s in idle_trajectory):.1f}°F - {max(s['indoor_temp'] for s in idle_trajectory):.1f}°F")
+            if controlled_trajectory:
+                logger.info(f"  - Controlled temp range: {min(s['indoor_temp'] for s in controlled_trajectory):.1f}°F - {max(s['indoor_temp'] for s in controlled_trajectory):.1f}°F")
+            
             result = {
                 'timestamp': datetime.now(),
                 'initial_conditions': initial_state,
@@ -598,29 +611,52 @@ class ForecastEngine:
         
         # Add historical data points (past 6 hours)
         if historical_weather:
+            # Handle case where historical_weather might be wrapped in another list
+            if len(historical_weather) == 1 and isinstance(historical_weather[0], list):
+                historical_weather = historical_weather[0]
+            
             logger.info(f"Adding {len(historical_weather)} historical weather points")
+            valid_count = 0
             for hist_point in historical_weather:
                 try:
+                    # Handle string data (skip invalid entries)
+                    if isinstance(hist_point, str):
+                        logger.debug(f"Skipping string historical weather point: {hist_point[:50]}...")
+                        continue
+                    
                     # Ensure hist_point is a dictionary
                     if not isinstance(hist_point, dict):
                         logger.warning(f"Skipping invalid historical weather point (not a dict): {type(hist_point)}")
                         continue
                     
-                    # Ensure required fields exist
+                    # Ensure required fields exist and have valid values
                     if 'timestamp' not in hist_point or 'temperature' not in hist_point:
-                        logger.warning(f"Skipping historical weather point missing required fields: {hist_point}")
+                        logger.debug(f"Skipping historical weather point missing required fields: {list(hist_point.keys()) if isinstance(hist_point, dict) else 'not dict'}")
+                        continue
+                    
+                    # Validate temperature is numeric
+                    try:
+                        temp = float(hist_point['temperature'])
+                        if temp < -50 or temp > 150:  # Reasonable temperature bounds
+                            logger.debug(f"Skipping historical weather point with invalid temperature: {temp}°F")
+                            continue
+                    except (ValueError, TypeError):
+                        logger.debug(f"Skipping historical weather point with non-numeric temperature: {hist_point['temperature']}")
                         continue
                     
                     series.append({
                         'timestamp': hist_point['timestamp'],
-                        'outdoor_temp': hist_point['temperature'],
-                        'outdoor_humidity': hist_point.get('humidity', 50.0),
-                        'solar_irradiance': hist_point.get('solar_irradiance', 0.0),
+                        'outdoor_temp': temp,
+                        'outdoor_humidity': max(0, min(100, float(hist_point.get('humidity', 50.0)))),  # Clamp 0-100%
+                        'solar_irradiance': max(0, float(hist_point.get('solar_irradiance', 0.0))),  # Non-negative
                         'data_type': 'historical'
                     })
+                    valid_count += 1
                 except Exception as e:
-                    logger.warning(f"Error processing historical weather point: {e}")
+                    logger.debug(f"Error processing historical weather point: {e}")
                     continue
+            
+            logger.info(f"Successfully added {valid_count} valid historical weather points")
         
         # Add current point
         current_outdoor_temp = current_data.get('outdoor_temp')
@@ -659,17 +695,85 @@ class ForecastEngine:
             'data_type': 'current'
         })
         
-        # Add forecast data (future 12 hours)
+        # Add AccuWeather forecast data (future 12+ hours)
+        forecast_added = 0
         if 'hourly_forecast' in weather_forecast and weather_forecast['hourly_forecast']:
-            logger.info(f"Adding {len(weather_forecast['hourly_forecast'])} forecast points")
+            logger.info(f"Processing {len(weather_forecast['hourly_forecast'])} AccuWeather forecast points")
             for forecast_point in weather_forecast['hourly_forecast']:
-                series.append({
-                    'timestamp': forecast_point['timestamp'],
-                    'outdoor_temp': forecast_point['temperature'],
-                    'outdoor_humidity': forecast_point.get('humidity', 50.0),
-                    'solar_irradiance': forecast_point.get('solar_irradiance', 0.0),
-                    'data_type': 'forecast'
-                })
+                try:
+                    # Validate forecast point structure
+                    if not isinstance(forecast_point, dict):
+                        logger.debug(f"Skipping invalid forecast point: {type(forecast_point)}")
+                        continue
+                    
+                    # Ensure required fields exist
+                    if 'timestamp' not in forecast_point or 'temperature' not in forecast_point:
+                        logger.debug(f"Skipping forecast point missing required fields: {list(forecast_point.keys()) if isinstance(forecast_point, dict) else 'not dict'}")
+                        continue
+                    
+                    # Validate temperature
+                    try:
+                        temp = float(forecast_point['temperature'])
+                        if temp < -50 or temp > 150:  # Reasonable bounds
+                            logger.debug(f"Skipping forecast point with invalid temperature: {temp}°F")
+                            continue
+                    except (ValueError, TypeError):
+                        logger.debug(f"Skipping forecast point with non-numeric temperature: {forecast_point['temperature']}")
+                        continue
+                    
+                    series.append({
+                        'timestamp': forecast_point['timestamp'],
+                        'outdoor_temp': temp,
+                        'outdoor_humidity': max(0, min(100, float(forecast_point.get('humidity', 50.0)))),
+                        'solar_irradiance': max(0, float(forecast_point.get('solar_irradiance', 0.0))),
+                        'data_type': 'forecast'
+                    })
+                    forecast_added += 1
+                except Exception as e:
+                    logger.debug(f"Error processing forecast point: {e}")
+                    continue
+            
+            logger.info(f"Successfully added {forecast_added} AccuWeather forecast points")
+        else:
+            logger.warning("No AccuWeather hourly forecast data available - using simplified prediction")
+            # Generate basic forecast points if no AccuWeather data
+            current_temp = current_outdoor_temp or 70.0
+            for i in range(1, 13):  # Next 12 hours
+                try:
+                    future_time = current_time + timedelta(hours=i)
+                    # Simple temperature variation based on time of day
+                    hour_of_day = future_time.hour
+                    temp_variation = -10 if 2 <= hour_of_day <= 6 else (5 if 14 <= hour_of_day <= 16 else 0)
+                    
+                    series.append({
+                        'timestamp': future_time,
+                        'outdoor_temp': current_temp + temp_variation,
+                        'outdoor_humidity': 50.0,  # Default
+                        'solar_irradiance': 800.0 if 8 <= hour_of_day <= 18 else 0.0,  # Daylight hours
+                        'data_type': 'forecast_simple'
+                    })
+                    forecast_added += 1
+                except Exception as e:
+                    logger.warning(f"Error generating simple forecast point: {e}")
+                    continue
+        
+        # Normalize all timestamps to be timezone-aware before sorting
+        for point in series:
+            timestamp = point['timestamp']
+            if timestamp and hasattr(timestamp, 'tzinfo') and timestamp.tzinfo is None:
+                # Convert naive datetime to timezone-aware using system timezone
+                try:
+                    import pytz
+                    if hasattr(self, 'ha_client') and self.ha_client:
+                        tz_name = self.ha_client.get_timezone() or 'UTC'
+                        tz = pytz.timezone(tz_name)
+                        point['timestamp'] = tz.localize(timestamp)
+                    else:
+                        # Fallback to UTC
+                        point['timestamp'] = pytz.UTC.localize(timestamp)
+                except Exception as e:
+                    logger.warning(f"Could not convert timestamp to timezone-aware: {e}")
+                    # Keep as-is if conversion fails
         
         # Fill gaps and ensure proper time sequence
         series = sorted(series, key=lambda x: x['timestamp'])
