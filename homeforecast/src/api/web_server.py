@@ -10,8 +10,26 @@ from flask_cors import CORS
 import asyncio
 import threading
 import os
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
 
 logger = logging.getLogger(__name__)
+
+
+def convert_numpy_types(obj):
+    """Convert numpy types to native Python types for JSON serialization"""
+    if hasattr(obj, 'item'):  # numpy scalar
+        return obj.item()
+    elif isinstance(obj, dict):
+        return {k: convert_numpy_types(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(v) for v in obj]
+    elif HAS_NUMPY and isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return obj
 
 
 def create_app(homeforecast_instance):
@@ -110,6 +128,8 @@ def create_app(homeforecast_instance):
     def get_latest_forecast():
         """Get the most recent forecast"""
         try:
+            logger.info("🌐 API: Processing /api/forecast/latest request")
+            
             # Run async function in sync context
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -119,8 +139,27 @@ def create_app(homeforecast_instance):
             )
             
             if forecast:
+                logger.info(f"Retrieved forecast with keys: {list(forecast.keys())}")
+                if 'data' in forecast:
+                    forecast_data = forecast['data']
+                    logger.info(f"Forecast data keys: {list(forecast_data.keys())}")
+                    
+                    # Add chart-ready data for frontend
+                    if 'timestamps' in forecast_data and 'indoor_forecast' in forecast_data and 'outdoor_forecast' in forecast_data:
+                        chart_data = {
+                            'timestamps': forecast_data['timestamps'],
+                            'indoor_temps': forecast_data['indoor_forecast'],
+                            'outdoor_temps': forecast_data['outdoor_forecast'],
+                            'idle_trajectory': forecast_data.get('idle_trajectory', []),
+                            'controlled_trajectory': forecast_data.get('controlled_trajectory', [])
+                        }
+                        forecast['chart_data'] = chart_data
+                        logger.info(f"Added chart data with {len(chart_data['timestamps'])} points")
+                
+                logger.info(f"✅ API: Returning forecast data")
                 return jsonify(forecast)
             else:
+                logger.warning("No forecast available yet")
                 return jsonify({'message': 'No forecast available yet'}), 404
                 
         except Exception as e:
@@ -154,18 +193,33 @@ def create_app(homeforecast_instance):
     def get_model_parameters():
         """Get current thermal model parameters"""
         try:
+            logger.info("🌐 API: Processing /api/model/parameters request")
+            
             params = app.homeforecast.thermal_model.get_parameters()
             quality = app.homeforecast.thermal_model.get_model_quality_metrics()
+            
+            logger.info(f"Raw model parameters: {params}")
+            logger.info(f"Model quality metrics: {quality}")
+            
+            # Convert numpy types for JSON serialization
+            params_cleaned = convert_numpy_types(params)
+            quality_cleaned = convert_numpy_types(quality) if quality else {}
+            
+            logger.info(f"Cleaned parameters: {params_cleaned}")
             
             ml_info = None
             if app.homeforecast.thermal_model.ml_corrector:
                 ml_info = app.homeforecast.thermal_model.ml_corrector.get_model_info()
+                ml_info = convert_numpy_types(ml_info) if ml_info else None
                 
-            return jsonify({
-                'thermal_model': params,
-                'model_quality': quality,
+            response_data = {
+                'thermal_model': params_cleaned,
+                'model_quality': quality_cleaned,
                 'ml_correction': ml_info
-            })
+            }
+            
+            logger.info(f"✅ API: Returning model parameters: {response_data}")
+            return jsonify(response_data)
             
         except Exception as e:
             logger.error(f"Error getting model parameters: {e}")
@@ -175,6 +229,8 @@ def create_app(homeforecast_instance):
     def get_comfort_analysis():
         """Get latest comfort analysis"""
         try:
+            logger.info("🌐 API: Processing /api/comfort/analysis request")
+            
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
@@ -184,14 +240,23 @@ def create_app(homeforecast_instance):
             )
             
             if not forecast:
+                logger.warning("No forecast available for comfort analysis")
                 return jsonify({'message': 'No analysis available yet'}), 404
+                
+            logger.info(f"Retrieved forecast for analysis with keys: {list(forecast.get('data', {}).keys())}")
                 
             # Run comfort analysis
             analysis = loop.run_until_complete(
                 app.homeforecast.comfort_analyzer.analyze(forecast['data'])
             )
             
-            return jsonify(analysis)
+            logger.info(f"Comfort analysis result keys: {list(analysis.keys())}")
+            
+            # Convert numpy types for JSON serialization
+            analysis_cleaned = convert_numpy_types(analysis)
+            logger.info(f"✅ API: Returning comfort analysis: {analysis_cleaned}")
+            
+            return jsonify(analysis_cleaned)
             
         except Exception as e:
             logger.error(f"Error getting comfort analysis: {e}")
@@ -223,15 +288,24 @@ def create_app(homeforecast_instance):
     def get_statistics():
         """Get database and model statistics"""
         try:
-            db_stats = app.homeforecast.data_store.get_statistics()
+            logger.info("🌐 API: Processing /api/statistics request")
             
-            return jsonify({
+            db_stats = app.homeforecast.data_store.get_statistics()
+            logger.info(f"Database statistics: {db_stats}")
+            
+            model_stats = {
+                'parameter_history_count': len(app.homeforecast.thermal_model.parameter_history),
+                'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None
+            }
+            logger.info(f"Model statistics: {model_stats}")
+            
+            response_data = {
                 'database': db_stats,
-                'model': {
-                    'parameter_history_count': len(app.homeforecast.thermal_model.parameter_history),
-                    'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None
-                }
-            })
+                'model': model_stats
+            }
+            
+            logger.info(f"✅ API: Returning statistics: {response_data}")
+            return jsonify(response_data)
             
         except Exception as e:
             logger.error(f"Error getting statistics: {e}")
