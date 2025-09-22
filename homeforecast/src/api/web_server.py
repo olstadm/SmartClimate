@@ -72,7 +72,7 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
                 runtime_hours = temp_diff / heating_rate
                 insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
                 off_time = now + timedelta(hours=runtime_hours)
-                insights['action_off_time'] = off_time.strftime("%H:%M")
+                insights['action_off_time'] = off_time.strftime("%I:%M %p")
                 
                 # Predict next heating cycle (when temp drops to comfort_min)
                 temp_after_off = target_temp
@@ -80,7 +80,7 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
                     temp_after_off -= drift_rate
                     if temp_after_off <= comfort_min:
                         next_heat_time = off_time + timedelta(hours=hour-0.5)  # Start early
-                        insights['next_action_time'] = next_heat_time.strftime("%H:%M")
+                        insights['next_action_time'] = next_heat_time.strftime("%I:%M %p")
                         break
             else:
                 insights['action_off_time'] = "Now"
@@ -95,7 +95,7 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
                 runtime_hours = temp_diff / cooling_rate
                 insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
                 off_time = now + timedelta(hours=runtime_hours)
-                insights['action_off_time'] = off_time.strftime("%H:%M")
+                insights['action_off_time'] = off_time.strftime("%I:%M %p")
                 
                 # Predict next cooling cycle (when temp rises to comfort_max)
                 temp_after_off = target_temp
@@ -103,7 +103,7 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
                     temp_after_off += drift_rate
                     if temp_after_off >= comfort_max:
                         next_cool_time = off_time + timedelta(hours=hour-0.5)  # Start early
-                        insights['next_action_time'] = next_cool_time.strftime("%H:%M")
+                        insights['next_action_time'] = next_cool_time.strftime("%I:%M %p")
                         break
             else:
                 insights['action_off_time'] = "Now"
@@ -128,7 +128,7 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
                         temp_prediction -= drift_rate
                         if temp_prediction <= comfort_min:
                             heat_start_time = now + timedelta(hours=max(0, hour-1))
-                            insights['next_action_time'] = heat_start_time.strftime("%H:%M")
+                            insights['next_action_time'] = heat_start_time.strftime("%I:%M %p")
                             break
                             
                 # Predict when cooling will be needed
@@ -138,7 +138,7 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
                         temp_prediction += drift_rate
                         if temp_prediction >= comfort_max:
                             cool_start_time = now + timedelta(hours=max(0, hour-1))
-                            insights['next_action_time'] = cool_start_time.strftime("%H:%M")
+                            insights['next_action_time'] = cool_start_time.strftime("%I:%M %p")
                             break
         
         # Format times based on timezone if available
@@ -265,7 +265,7 @@ def create_app(homeforecast_instance):
                         app.homeforecast.thermal_model.last_update
                     )
                 else:
-                    last_update_str = app.homeforecast.thermal_model.last_update.strftime("%m/%d %H:%M")
+                    last_update_str = app.homeforecast.thermal_model.last_update.strftime("%m/%d %I:%M %p")
 
             # Get ML model performance data
             ml_performance = {}
@@ -328,7 +328,7 @@ def create_app(homeforecast_instance):
                 if hasattr(app.homeforecast, 'ha_client'):
                     current_local_time = app.homeforecast.ha_client.format_time_for_display(datetime.now())
                 else:
-                    current_local_time = datetime.now().strftime("%H:%M")
+                    current_local_time = datetime.now().strftime("%I:%M %p")
             except Exception as e:
                 logger.warning(f"Could not format current time: {e}")
 

@@ -147,12 +147,12 @@ class HomeAssistantClient:
     def format_time_for_display(self, utc_datetime=None) -> str:
         """Format datetime for dashboard display"""
         local_time = self.get_local_time(utc_datetime)
-        return local_time.strftime("%H:%M")
+        return local_time.strftime("%I:%M %p")
 
     def format_datetime_for_display(self, utc_datetime=None) -> str:
         """Format full datetime for dashboard display"""
         local_time = self.get_local_time(utc_datetime)
-        return local_time.strftime("%m/%d %H:%M")
+        return local_time.strftime("%m/%d %I:%M %p")
             
     async def get_sensor_data(self) -> Dict:
         """Collect current sensor data"""

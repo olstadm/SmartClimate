@@ -493,7 +493,7 @@ class ComfortAnalyzer:
                     'type': 'hvac_schedule',
                     'priority': 'medium',
                     'message': f"Optimal HVAC start time in {start_in_minutes:.0f} minutes",
-                    'action': f"Schedule {forecast_result['initial_conditions']['hvac_state']} to start at {hvac_timing['start_time'].strftime('%H:%M')}"
+                    'action': f"Schedule {forecast_result['initial_conditions']['hvac_state']} to start at {hvac_timing['start_time'].strftime('%I:%M %p')}"
                 })
                 
         # Efficiency recommendation
@@ -546,7 +546,7 @@ class ComfortAnalyzer:
         if analysis_result['hvac_start_time']:
             triggers.append({
                 'platform': 'time',
-                'at': analysis_result['hvac_start_time'].strftime('%H:%M:%S'),
+                'at': analysis_result['hvac_start_time'].strftime('%I:%M:%S %p'),
                 'action': {
                     'service': 'climate.set_hvac_mode',
                     'data': {
@@ -559,7 +559,7 @@ class ComfortAnalyzer:
         if analysis_result['hvac_stop_time']:
             triggers.append({
                 'platform': 'time',
-                'at': analysis_result['hvac_stop_time'].strftime('%H:%M:%S'),
+                'at': analysis_result['hvac_stop_time'].strftime('%I:%M:%S %p'),
                 'action': {
                     'service': 'climate.set_hvac_mode',
                     'data': {
