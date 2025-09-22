@@ -8,6 +8,12 @@ import math
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 import json
+try:
+    import pytz
+    from zoneinfo import ZoneInfo
+    HAS_TIMEZONE = True
+except ImportError:
+    HAS_TIMEZONE = False
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +41,7 @@ class HomeAssistantClient:
             logger.info(f"Connecting to Home Assistant at {self.base_url}")
             logger.debug(f"Using token: {'***' + self.token[-4:] if self.token and len(self.token) > 4 else 'No token'}")
             
-            # Test connection
+            # Test connection and get HA config
             async with self.session.get(
                 f"{self.base_url}/",
                 headers=self.headers
@@ -43,6 +49,16 @@ class HomeAssistantClient:
                 if resp.status == 200:
                     data = await resp.json()
                     logger.info(f"Connected to Home Assistant {data.get('version')}")
+                    
+                    # Get Home Assistant configuration including timezone
+                    ha_config = await self.get_ha_config()
+                    if ha_config:
+                        self.timezone = ha_config.get('time_zone', 'UTC')
+                        logger.info(f"🌍 Home Assistant timezone: {self.timezone}")
+                    else:
+                        self.timezone = 'UTC'
+                        logger.warning("Could not get HA timezone, defaulting to UTC")
+                        
                 else:
                     logger.error(f"Connection failed with status {resp.status}")
                     response_text = await resp.text()
@@ -59,6 +75,84 @@ class HomeAssistantClient:
         """Close connection"""
         if self.session:
             await self.session.close()
+
+    async def get_ha_config(self) -> Optional[Dict]:
+        """Get Home Assistant configuration including timezone"""
+        try:
+            logger.info("🔧 Getting Home Assistant configuration...")
+            
+            async with self.session.get(
+                f"{self.base_url}/config",
+                headers=self.headers
+            ) as resp:
+                if resp.status == 200:
+                    config = await resp.json()
+                    logger.info(f"HA Config - Location: {config.get('location_name')}, " +
+                              f"Timezone: {config.get('time_zone')}, " +
+                              f"Version: {config.get('version')}")
+                    return config
+                else:
+                    logger.warning(f"Failed to get HA config: {resp.status}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"Error getting HA config: {e}")
+            return None
+
+    def get_timezone(self) -> str:
+        """Get the configured timezone"""
+        return getattr(self, 'timezone', 'UTC')
+
+    def get_local_time(self, utc_datetime=None) -> datetime:
+        """Convert UTC datetime to local timezone"""
+        try:
+            if utc_datetime is None:
+                utc_datetime = datetime.utcnow()
+            
+            timezone_name = self.get_timezone()
+            
+            if HAS_TIMEZONE:
+                try:
+                    # Try using zoneinfo (Python 3.9+)
+                    from zoneinfo import ZoneInfo
+                    local_tz = ZoneInfo(timezone_name)
+                    if utc_datetime.tzinfo is None:
+                        utc_datetime = utc_datetime.replace(tzinfo=ZoneInfo('UTC'))
+                    return utc_datetime.astimezone(local_tz)
+                except ImportError:
+                    try:
+                        # Fallback to pytz
+                        import pytz
+                        local_tz = pytz.timezone(timezone_name)
+                        utc_tz = pytz.UTC
+                        if utc_datetime.tzinfo is None:
+                            utc_datetime = utc_tz.localize(utc_datetime)
+                        return utc_datetime.astimezone(local_tz)
+                    except ImportError:
+                        pass
+            
+            # Fallback: return UTC time with timezone name note
+            logger.warning(f"Timezone conversion not available, using UTC for {timezone_name}")
+            return utc_datetime
+            
+        except Exception as e:
+            logger.error(f"Error converting timezone: {e}")
+            return utc_datetime or datetime.utcnow()
+
+    def format_local_time(self, utc_datetime=None, format_str="%Y-%m-%d %H:%M:%S") -> str:
+        """Format UTC datetime as local time string"""
+        local_time = self.get_local_time(utc_datetime)
+        return local_time.strftime(format_str)
+
+    def format_time_for_display(self, utc_datetime=None) -> str:
+        """Format datetime for dashboard display"""
+        local_time = self.get_local_time(utc_datetime)
+        return local_time.strftime("%H:%M")
+
+    def format_datetime_for_display(self, utc_datetime=None) -> str:
+        """Format full datetime for dashboard display"""
+        local_time = self.get_local_time(utc_datetime)
+        return local_time.strftime("%m/%d %H:%M")
             
     async def get_sensor_data(self) -> Dict:
         """Collect current sensor data"""

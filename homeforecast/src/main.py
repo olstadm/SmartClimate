@@ -48,6 +48,7 @@ class HomeForecast:
         self.thermal_model = None
         self.forecast_engine = None
         self.comfort_analyzer = None
+        self.timezone = 'UTC'  # Default timezone
         self.scheduler = None
         self.web_app = None
         self.running = False
@@ -67,6 +68,10 @@ class HomeForecast:
         # Connect to Home Assistant
         self.ha_client = HomeAssistantClient(self.config)
         await self.ha_client.connect()
+        
+        # Get and store timezone from Home Assistant
+        self.timezone = self.ha_client.get_timezone()
+        logger.info(f"🌍 Using timezone: {self.timezone}")
         
         # Initialize thermal model
         self.thermal_model = ThermalModel(self.config, self.data_store)

@@ -180,12 +180,25 @@ class HomeForecastDashboard {
 
         // Update last update time
         const lastUpdateEl = document.getElementById('lastUpdate');
-        if (lastUpdateEl && status.last_update) {
-            const date = new Date(status.last_update);
-            lastUpdateEl.textContent = this.formatRelativeTime(date);
-        } else if (lastUpdateEl) {
-            lastUpdateEl.textContent = 'just now';
+        if (lastUpdateEl) {
+            if (status.last_update_display) {
+                lastUpdateEl.textContent = status.last_update_display;
+            } else if (status.last_update) {
+                const date = new Date(status.last_update);
+                lastUpdateEl.textContent = this.formatRelativeTime(date);
+            } else {
+                lastUpdateEl.textContent = 'just now';
+            }
         }
+
+        // Store timezone for use in other components
+        if (status.timezone) {
+            this.timezone = status.timezone;
+            console.log(`🌍 Using timezone: ${this.timezone}`);
+        }
+
+        // Update system information in Debug tab
+        this.updateSystemInfo(status);
 
         // Update current temperature from current sensor data
         const currentTempEl = document.getElementById('currentTemp');
@@ -267,6 +280,41 @@ class HomeForecastDashboard {
         }
     }
 
+    updateSystemInfo(status) {
+        // Update version information
+        const addonVersionEl = document.getElementById('addonVersion');
+        if (addonVersionEl && status.version) {
+            addonVersionEl.textContent = status.version;
+        }
+
+        // Update timezone information
+        const systemTimezoneEl = document.getElementById('systemTimezone');
+        if (systemTimezoneEl && status.timezone) {
+            systemTimezoneEl.textContent = status.timezone;
+        }
+
+        // Update current local time
+        const currentLocalTimeEl = document.getElementById('currentLocalTime');
+        if (currentLocalTimeEl) {
+            if (status.current_time) {
+                currentLocalTimeEl.textContent = status.current_time;
+            } else {
+                currentLocalTimeEl.textContent = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            }
+        }
+
+        // Set other system info (these could come from backend later)
+        const pythonVersionEl = document.getElementById('pythonVersion');
+        if (pythonVersionEl) {
+            pythonVersionEl.textContent = '3.12'; // Could be made dynamic
+        }
+
+        const logLevelEl = document.getElementById('logLevel');
+        if (logLevelEl) {
+            logLevelEl.textContent = 'INFO'; // Could be made dynamic
+        }
+    }
+
     updateForecast(forecast) {
         if (!forecast || !forecast.data) return;
 
@@ -296,9 +344,11 @@ class HomeForecastDashboard {
         console.log('Extracted HVAC periods:', hvacPeriods);
 
         const chartData = {
-            labels: data.timestamps.map(ts => 
-                new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
-            ),
+            labels: data.timestamps.map(ts => {
+                const date = new Date(ts);
+                // If we have timezone info, could adjust here, but browser handles local time conversion
+                return date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            }),
             datasets: [
                 {
                     label: 'Projected Indoor (Smart HVAC)',

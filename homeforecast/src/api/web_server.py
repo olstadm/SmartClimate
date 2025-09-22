@@ -42,6 +42,11 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
             'estimated_runtime': None
         }
         
+        # Get timezone from HA client if available
+        timezone_name = 'UTC'
+        if hasattr(comfort_analyzer, 'homeforecast') and hasattr(comfort_analyzer.homeforecast, 'timezone'):
+            timezone_name = comfort_analyzer.homeforecast.timezone
+        
         # Get current conditions
         current_temp = current_data.get('indoor_temp', 70.0)
         target_temp = thermostat_data.get('target_temperature', 72.0)
@@ -65,8 +70,8 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
                 heating_rate = 3.5  # °F/hour (default estimate)
                 runtime_hours = temp_diff / heating_rate
                 insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
-                insights['action_off_time'] = (datetime.now() + 
-                                             timedelta(hours=runtime_hours)).strftime("%H:%M")
+                off_time = datetime.now() + timedelta(hours=runtime_hours)
+                insights['action_off_time'] = off_time.strftime("%H:%M")
         elif hvac_action in ['cooling', 'cool']:
             insights['recommended_action'] = 'COOLING'
             # Estimate when cooling will stop (when target temp is reached)
@@ -75,8 +80,8 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
                 cooling_rate = 4.0  # °F/hour (default estimate)
                 runtime_hours = temp_diff / cooling_rate
                 insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
-                insights['action_off_time'] = (datetime.now() + 
-                                             timedelta(hours=runtime_hours)).strftime("%H:%M")
+                off_time = datetime.now() + timedelta(hours=runtime_hours)
+                insights['action_off_time'] = off_time.strftime("%H:%M")
         elif hvac_mode == 'heat' and current_temp < comfort_min:
             insights['recommended_action'] = 'HEAT'
             # Calculate when to start heating to maintain comfort
@@ -197,10 +202,23 @@ def create_app(homeforecast_instance):
                 app.homeforecast.comfort_analyzer if hasattr(app.homeforecast, 'comfort_analyzer') else None
             )
 
+            # Format last update time with timezone
+            last_update_str = None
+            if app.homeforecast.thermal_model.last_update:
+                if hasattr(app.homeforecast, 'ha_client'):
+                    last_update_str = app.homeforecast.ha_client.format_datetime_for_display(
+                        app.homeforecast.thermal_model.last_update
+                    )
+                else:
+                    last_update_str = app.homeforecast.thermal_model.last_update.strftime("%m/%d %H:%M")
+
             response_data = {
                 'status': 'running',
                 'version': '1.3.0',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
+                'last_update_display': last_update_str,
+                'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
+                'current_time': datetime.now().strftime("%H:%M"),
                 'current_data': current_data,
                 'thermostat_data': thermostat_data,
                 'climate_insights': climate_insights,
