@@ -32,6 +32,9 @@ class ComfortAnalyzer:
         
     def _parse_timestamp(self, timestamp):
         """Parse timestamp string to datetime object"""
+        if timestamp is None:
+            logger.warning("Received None timestamp")
+            return None
         if isinstance(timestamp, datetime):
             return timestamp
         if isinstance(timestamp, str):
@@ -48,8 +51,9 @@ class ComfortAnalyzer:
                         return datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S.%f')
                     except ValueError:
                         logger.warning(f"Could not parse timestamp: {timestamp}")
-                        return datetime.now()  # Fallback to current time
-        return datetime.now()  # Final fallback
+                        return None
+        logger.warning(f"Invalid timestamp type: {type(timestamp)} - {timestamp}")
+        return None
         
     async def analyze(self, forecast_result: Dict) -> Dict:
         """
@@ -62,10 +66,26 @@ class ComfortAnalyzer:
             Comfort analysis with recommendations
         """
         try:
+            logger.info("=== Starting Comfort Analysis ===")
+            
+            # Log what we received from forecast engine
+            logger.info(f"Forecast result keys available: {list(forecast_result.keys())}")
+            
+            # Log current sensor data if available in trajectory
+            if forecast_result.get('idle_trajectory'):
+                first_point = forecast_result['idle_trajectory'][0]
+                logger.info("Current sensor readings from trajectory:")
+                logger.info(f"  Indoor temp: {first_point.get('indoor_temp', 'N/A')}°F")
+                logger.info(f"  Outdoor temp: {first_point.get('outdoor_temp', 'N/A')}°F") 
+                logger.info(f"  HVAC mode: {first_point.get('hvac_mode', 'N/A')}")
+                logger.info(f"  Timestamp: {first_point.get('timestamp', 'N/A')}")
+            
             # Get trajectories with fallback for missing keys
             idle_traj = forecast_result.get('idle_trajectory', [])
             controlled_traj = forecast_result.get('controlled_trajectory', [])
             current_traj = forecast_result.get('current_trajectory', idle_traj)  # Fallback to idle_traj
+            
+            logger.info(f"Trajectory data points - Idle: {len(idle_traj)}, Controlled: {len(controlled_traj)}, Current: {len(current_traj)}")
             
             # If no trajectories are available, return empty analysis
             if not idle_traj:
@@ -78,6 +98,13 @@ class ComfortAnalyzer:
                     'analysis': 'Insufficient data for comfort analysis'
                 }
             
+            # Validate trajectory data has required fields
+            if not self._validate_trajectory_data(idle_traj):
+                logger.error("Trajectory data missing required fields")
+                return self._generate_error_response("Invalid trajectory data")
+            
+            logger.info("Finding critical comfort zone timing...")
+            
             # Find critical times
             time_to_upper, upper_timestamp = self._find_time_to_limit(
                 idle_traj, self.comfort_max, direction='upper'
@@ -85,6 +112,9 @@ class ComfortAnalyzer:
             time_to_lower, lower_timestamp = self._find_time_to_limit(
                 idle_traj, self.comfort_min, direction='lower'
             )
+            
+            logger.info(f"Time to upper limit ({self.comfort_max}°F): {time_to_upper} minutes")
+            logger.info(f"Time to lower limit ({self.comfort_min}°F): {time_to_lower} minutes")
             
             # Determine recommended mode (only if smart control is enabled)
             if self.config.is_smart_hvac_enabled():
@@ -140,7 +170,44 @@ class ComfortAnalyzer:
             
         except Exception as e:
             logger.error(f"Error in comfort analysis: {e}", exc_info=True)
-            raise
+            return self._generate_error_response(f"Analysis error: {e}")
+            
+    def _validate_trajectory_data(self, trajectory: List[Dict]) -> bool:
+        """Validate that trajectory data has all required fields"""
+        if not trajectory:
+            return False
+            
+        required_fields = ['indoor_temp', 'timestamp']
+        for point in trajectory[:3]:  # Check first few points
+            for field in required_fields:
+                if field not in point:
+                    logger.error(f"Missing required field '{field}' in trajectory point")
+                    return False
+        return True
+        
+    def _generate_error_response(self, error_message: str) -> Dict:
+        """Generate a safe error response for comfort analysis"""
+        logger.warning(f"Returning error response: {error_message}")
+        return {
+            'time_to_upper_limit': None,
+            'time_to_lower_limit': None,
+            'upper_limit_timestamp': None,
+            'lower_limit_timestamp': None,
+            'recommended_mode': 'off',
+            'smart_hvac_enabled': False,
+            'hvac_start_time': None,
+            'hvac_stop_time': None,
+            'hvac_duration_minutes': 0,
+            'comfort_score': 0,
+            'efficiency_score': 0,
+            'recommendations': [{
+                'type': 'system_error',
+                'priority': 'high',
+                'message': f'Comfort analysis unavailable: {error_message}',
+                'action': 'Check system logs and sensor configuration'
+            }],
+            'analysis': error_message
+        }
             
     def _find_time_to_limit(self, trajectory: List[Dict], limit: float, 
                            direction: str) -> Tuple[Optional[float], Optional[datetime]]:
@@ -155,26 +222,38 @@ class ComfortAnalyzer:
         Returns:
             (minutes until limit, timestamp when limit reached)
         """
-        current_time = datetime.now()
-        
-        for i, point in enumerate(trajectory):
-            temp = point['indoor_temp']
+        try:
+            current_time = datetime.now()
             
-            # Parse timestamp using helper method
-            point_time = self._parse_timestamp(point['timestamp'])
+            for i, point in enumerate(trajectory):
+                # Safely get temperature with fallback
+                temp = point.get('indoor_temp')
+                if temp is None:
+                    logger.warning(f"Missing indoor_temp in trajectory point {i}")
+                    continue
+                    
+                # Parse timestamp using helper method
+                point_time = self._parse_timestamp(point.get('timestamp'))
+                if point_time is None:
+                    logger.warning(f"Invalid timestamp in trajectory point {i}")
+                    continue
+                
+                if direction == 'upper' and temp >= limit:
+                    # Found upper limit breach
+                    minutes = (point_time - current_time).total_seconds() / 60
+                    return minutes, point_time
+                    
+                elif direction == 'lower' and temp <= limit:
+                    # Found lower limit breach
+                    minutes = (point_time - current_time).total_seconds() / 60
+                    return minutes, point_time
+                    
+            # Limit not reached in forecast period
+            return None, None
             
-            if direction == 'upper' and temp >= limit:
-                # Found upper limit breach
-                minutes = (point_time - current_time).total_seconds() / 60
-                return minutes, point_time
-                
-            elif direction == 'lower' and temp <= limit:
-                # Found lower limit breach
-                minutes = (point_time - current_time).total_seconds() / 60
-                return minutes, point_time
-                
-        # Limit not reached in forecast period
-        return None, None
+        except Exception as e:
+            logger.error(f"Error in _find_time_to_limit: {e}")
+            return None, None
         
     def _determine_recommended_mode(self, current_temp: float,
                                    time_to_upper: Optional[float],
@@ -354,8 +433,21 @@ class ComfortAnalyzer:
         """
         Generate detailed, actionable recommendations
         """
+        logger.info("Generating detailed recommendations...")
+        
         recommendations = []
-        current_temp = forecast_result['initial_conditions']['indoor_temp']
+        
+        # Get current temperature from trajectory (fallback for missing initial_conditions)
+        current_temp = None
+        if 'initial_conditions' in forecast_result and 'indoor_temp' in forecast_result['initial_conditions']:
+            current_temp = forecast_result['initial_conditions']['indoor_temp']
+            logger.info(f"Using current temp from initial_conditions: {current_temp}°F")
+        elif forecast_result.get('idle_trajectory'):
+            current_temp = forecast_result['idle_trajectory'][0]['indoor_temp']
+            logger.info(f"Using current temp from first trajectory point: {current_temp}°F")
+        else:
+            logger.warning("No current temperature available - using comfort zone midpoint")
+            current_temp = (self.comfort_min + self.comfort_max) / 2
         
         # Smart HVAC control status
         if not self.config.is_smart_hvac_enabled():

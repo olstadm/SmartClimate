@@ -63,36 +63,52 @@ class HomeAssistantClient:
     async def get_sensor_data(self) -> Dict:
         """Collect current sensor data"""
         try:
+            logger.info("=== Collecting Local Sensor Data ===")
             data = {}
             
             # Get indoor temperature (in Fahrenheit)
-            indoor_temp = await self._get_state(self.config.get('indoor_temp_entity'))
+            indoor_temp_entity = self.config.get('indoor_temp_entity')
+            logger.info(f"Reading indoor temperature from entity: {indoor_temp_entity}")
+            indoor_temp = await self._get_state(indoor_temp_entity)
             data['indoor_temp'] = float(indoor_temp) if indoor_temp else 70.0
+            logger.info(f"Indoor temperature: {data['indoor_temp']}°F")
             
             # Get indoor humidity
-            indoor_humidity = await self._get_state(self.config.get('indoor_humidity_entity'))
+            indoor_humidity_entity = self.config.get('indoor_humidity_entity')
+            logger.info(f"Reading indoor humidity from entity: {indoor_humidity_entity}")
+            indoor_humidity = await self._get_state(indoor_humidity_entity)
             data['indoor_humidity'] = float(indoor_humidity) if indoor_humidity else 50.0
+            logger.info(f"Indoor humidity: {data['indoor_humidity']}%")
             
             # Get outdoor temperature (optional, in Fahrenheit)
             outdoor_temp_entity = self.config.get('outdoor_temp_entity')
             if outdoor_temp_entity:
+                logger.info(f"Reading outdoor temperature from entity: {outdoor_temp_entity}")
                 outdoor_temp = await self._get_state(outdoor_temp_entity)
                 data['outdoor_temp'] = float(outdoor_temp) if outdoor_temp else data['indoor_temp']
+                logger.info(f"Local outdoor temperature: {data['outdoor_temp']}°F")
             else:
                 # Will be filled from AccuWeather
                 data['outdoor_temp'] = None
+                logger.info("No local outdoor temperature sensor - will use AccuWeather data")
                 
             # Get outdoor humidity (optional)
             outdoor_humidity_entity = self.config.get('outdoor_humidity_entity')
             if outdoor_humidity_entity:
+                logger.info(f"Reading outdoor humidity from entity: {outdoor_humidity_entity}")
                 outdoor_humidity = await self._get_state(outdoor_humidity_entity)
                 data['outdoor_humidity'] = float(outdoor_humidity) if outdoor_humidity else 50.0
+                logger.info(f"Local outdoor humidity: {data['outdoor_humidity']}%")
             else:
                 data['outdoor_humidity'] = None
+                logger.info("No local outdoor humidity sensor - will use AccuWeather data")
                 
             # Get HVAC state
-            hvac_state = await self._get_climate_state(self.config.get('hvac_entity'))
+            hvac_entity = self.config.get('hvac_entity')
+            logger.info(f"Reading HVAC state from entity: {hvac_entity}")
+            hvac_state = await self._get_climate_state(hvac_entity)
             data['hvac_state'] = hvac_state
+            logger.info(f"HVAC state: {hvac_state}")
             
             # Get solar irradiance if available
             solar_entity = self.config.get('solar_irradiance_entity')
@@ -167,9 +183,13 @@ class HomeAssistantClient:
     async def get_weather_forecast(self) -> Dict:
         """Get weather forecast from AccuWeather"""
         try:
+            logger.info("=== Getting Weather Forecast from AccuWeather ===")
+            
             # Get current conditions and 12-hour forecast from AccuWeather
             api_key = self.config.get('accuweather_api_key')
             location_key = self.config.get('accuweather_location_key')
+            
+            logger.info(f"AccuWeather API configured: Location key = {location_key[:8]}... API key = {'Yes' if api_key else 'No'}")
             
             forecast_data = {
                 'hourly_forecast': [],
@@ -183,13 +203,19 @@ class HomeAssistantClient:
             async with self.session.get(current_url, params=params) as resp:
                 if resp.status == 200:
                     data = await resp.json()
+                    logger.info("✅ Successfully retrieved AccuWeather current conditions")
                     if data and len(data) > 0:
                         current = data[0]
+                        current_temp = current['Temperature']['Imperial']['Value']
+                        current_humidity = current['RelativeHumidity']
+                        logger.info(f"Current AccuWeather data: {current_temp}°F, {current_humidity}% humidity")
                         forecast_data['current_outdoor'] = {
-                            'temperature': current['Temperature']['Imperial']['Value'],
-                            'humidity': current['RelativeHumidity'],
+                            'temperature': current_temp,
+                            'humidity': current_humidity,
                             'solar_irradiance': self._estimate_solar_irradiance(current)
                         }
+                else:
+                    logger.error(f"❌ Failed to get AccuWeather current conditions: HTTP {resp.status}")
                         
             # Get 12-hour forecast
             forecast_url = f"http://dataservice.accuweather.com/forecasts/v1/hourly/12hour/{location_key}"
@@ -197,6 +223,7 @@ class HomeAssistantClient:
             async with self.session.get(forecast_url, params={'apikey': api_key, 'metric': 'false'}) as resp:
                 if resp.status == 200:
                     data = await resp.json()
+                    logger.info(f"✅ Successfully retrieved AccuWeather 12-hour forecast ({len(data)} hours)")
                     
                     for hour in data:
                         forecast_data['hourly_forecast'].append({
@@ -206,8 +233,14 @@ class HomeAssistantClient:
                             'solar_irradiance': self._calculate_solar_irradiance(hour),
                             'precipitation_probability': hour.get('PrecipitationProbability', 0)
                         })
+                    
+                    # Log forecast range
+                    if data:
+                        first_hour = data[0]['DateTime']
+                        last_hour = data[-1]['DateTime'] 
+                        logger.info(f"Forecast range: {first_hour} to {last_hour}")
                 else:
-                    logger.error(f"Failed to get weather forecast: {resp.status}")
+                    logger.error(f"❌ Failed to get AccuWeather forecast: HTTP {resp.status}")
                     
             return forecast_data
             
