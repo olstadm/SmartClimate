@@ -30,6 +30,27 @@ class ComfortAnalyzer:
         self.min_runtime_minutes = 10   # Minimum HVAC runtime
         self.min_offtime_minutes = 10   # Minimum time between cycles
         
+    def _parse_timestamp(self, timestamp):
+        """Parse timestamp string to datetime object"""
+        if isinstance(timestamp, datetime):
+            return timestamp
+        if isinstance(timestamp, str):
+            try:
+                # Try ISO format first
+                return datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            except ValueError:
+                try:
+                    # Try standard datetime format
+                    return datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+                except ValueError:
+                    try:
+                        # Try with microseconds
+                        return datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S.%f')
+                    except ValueError:
+                        logger.warning(f"Could not parse timestamp: {timestamp}")
+                        return datetime.now()  # Fallback to current time
+        return datetime.now()  # Final fallback
+        
     async def analyze(self, forecast_result: Dict) -> Dict:
         """
         Analyze forecast to generate comfort recommendations
@@ -139,15 +160,18 @@ class ComfortAnalyzer:
         for i, point in enumerate(trajectory):
             temp = point['indoor_temp']
             
+            # Parse timestamp using helper method
+            point_time = self._parse_timestamp(point['timestamp'])
+            
             if direction == 'upper' and temp >= limit:
                 # Found upper limit breach
-                minutes = (point['timestamp'] - current_time).total_seconds() / 60
-                return minutes, point['timestamp']
+                minutes = (point_time - current_time).total_seconds() / 60
+                return minutes, point_time
                 
             elif direction == 'lower' and temp <= limit:
                 # Found lower limit breach
-                minutes = (point['timestamp'] - current_time).total_seconds() / 60
-                return minutes, point['timestamp']
+                minutes = (point_time - current_time).total_seconds() / 60
+                return minutes, point_time
                 
         # Limit not reached in forecast period
         return None, None
@@ -223,7 +247,8 @@ class ComfortAnalyzer:
                     needed_rise = self.comfort_min + 0.5 - point['indoor_temp']
                     lead_time_hours = needed_rise / heat_rate
                     
-                    start_time = point['timestamp'] - timedelta(hours=lead_time_hours)
+                    point_time = self._parse_timestamp(point['timestamp'])
+                    start_time = point_time - timedelta(hours=lead_time_hours)
                     break
                     
         elif recommended_mode == 'cool':
@@ -235,7 +260,8 @@ class ComfortAnalyzer:
                     needed_drop = point['indoor_temp'] - (self.comfort_max - 0.5)
                     lead_time_hours = needed_drop / cool_rate
                     
-                    start_time = point['timestamp'] - timedelta(hours=lead_time_hours)
+                    point_time = self._parse_timestamp(point['timestamp'])
+                    start_time = point_time - timedelta(hours=lead_time_hours)
                     break
                     
         # Find optimal stop time by looking at controlled trajectory
@@ -244,12 +270,13 @@ class ComfortAnalyzer:
             target_temp = (self.comfort_min + self.comfort_max) / 2  # Aim for middle
             
             for point in controlled_traj:
-                if point['timestamp'] > start_time:
+                point_time = self._parse_timestamp(point['timestamp'])
+                if point_time > start_time:
                     if recommended_mode == 'heat' and point['indoor_temp'] >= target_temp:
-                        stop_time = point['timestamp']
+                        stop_time = point_time
                         break
                     elif recommended_mode == 'cool' and point['indoor_temp'] <= target_temp:
-                        stop_time = point['timestamp']
+                        stop_time = point_time
                         break
                         
         # Calculate runtime
