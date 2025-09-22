@@ -30,19 +30,27 @@ class HomeAssistantClient:
         try:
             self.session = aiohttp.ClientSession()
             
+            logger.info(f"Connecting to Home Assistant at {self.base_url}")
+            logger.debug(f"Using token: {'***' + self.token[-4:] if self.token and len(self.token) > 4 else 'No token'}")
+            
             # Test connection
             async with self.session.get(
-                f"{self.base_url}/api/",
+                f"{self.base_url}/",
                 headers=self.headers
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     logger.info(f"Connected to Home Assistant {data.get('version')}")
                 else:
+                    logger.error(f"Connection failed with status {resp.status}")
+                    response_text = await resp.text()
+                    logger.error(f"Response: {response_text}")
                     raise ConnectionError(f"Failed to connect: {resp.status}")
                     
         except Exception as e:
             logger.error(f"Error connecting to Home Assistant: {e}")
+            if self.session:
+                await self.session.close()
             raise
             
     async def disconnect(self):
@@ -104,7 +112,7 @@ class HomeAssistantClient:
         """Get state of an entity"""
         try:
             async with self.session.get(
-                f"{self.base_url}/api/states/{entity_id}",
+                f"{self.base_url}/states/{entity_id}",
                 headers=self.headers
             ) as resp:
                 if resp.status == 200:
@@ -122,7 +130,7 @@ class HomeAssistantClient:
         """Get HVAC operating state from climate entity"""
         try:
             async with self.session.get(
-                f"{self.base_url}/api/states/{entity_id}",
+                f"{self.base_url}/states/{entity_id}",
                 headers=self.headers
             ) as resp:
                 if resp.status == 200:
@@ -266,7 +274,7 @@ class HomeAssistantClient:
             }
             
             async with self.session.post(
-                f"{self.base_url}/api/states/{entity_id}",
+                f"{self.base_url}/states/{entity_id}",
                 headers=self.headers,
                 json=data
             ) as resp:
@@ -282,7 +290,7 @@ class HomeAssistantClient:
         """Fire an event in Home Assistant"""
         try:
             async with self.session.post(
-                f"{self.base_url}/api/events/{event_type}",
+                f"{self.base_url}/events/{event_type}",
                 headers=self.headers,
                 json=event_data
             ) as resp:
@@ -298,7 +306,7 @@ class HomeAssistantClient:
         """Call a Home Assistant service"""
         try:
             async with self.session.post(
-                f"{self.base_url}/api/services/{domain}/{service}",
+                f"{self.base_url}/services/{domain}/{service}",
                 headers=self.headers,
                 json=service_data
             ) as resp:
