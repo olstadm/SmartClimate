@@ -574,10 +574,26 @@ class HomeAssistantClient:
         # Try to get forecast with retry logic  
         forecast_success = await self._get_accuweather_forecast(api_key, location_key, forecast_data)
         
-        # If both failed, return fallback data
+        # Try to get historical data for trend analysis
+        logger.info("🕰️ Fetching historical weather data for trend analysis...")
+        historical_data = await self.get_historical_weather_data(hours=6)
+        if historical_data and 'historical_weather' in historical_data:
+            forecast_data['historical_weather'] = historical_data['historical_weather']
+            if historical_data['data_quality']['issues']:
+                forecast_data['data_quality']['issues'].extend(historical_data['data_quality']['issues'])
+            logger.info(f"✅ Historical data integrated: {len(historical_data['historical_weather'])} data points")
+        else:
+            logger.warning("⚠️ No historical data available - trend analysis will be limited")
+            forecast_data['historical_weather'] = []
+        
+        # If both current and forecast failed, return fallback data
         if not current_success and not forecast_success:
             logger.error("❌ Complete AccuWeather API failure - using fallback weather data")
-            return self._get_fallback_weather_data("API completely unavailable")
+            fallback_data = self._get_fallback_weather_data("API completely unavailable")
+            # Still include whatever historical data we got
+            if forecast_data['historical_weather']:
+                fallback_data['historical_weather'] = forecast_data['historical_weather']
+            return fallback_data
         
         # If we got some data but not all, log the issue
         if not current_success:
@@ -726,6 +742,159 @@ class HomeAssistantClient:
                 await asyncio.sleep(2 ** attempt)
                 
         return False
+
+    async def get_historical_weather_data(self, hours: int = 6) -> Dict:
+        """Get historical weather data from AccuWeather for the past N hours"""
+        logger.info(f"=== Getting Historical Weather Data (past {hours} hours) ===")
+        
+        api_key = self.config.get('accuweather_api_key')
+        location_key = self.config.get('accuweather_location_key')
+        
+        if not api_key or not location_key:
+            logger.error("❌ AccuWeather API credentials not configured for historical data")
+            return self._get_fallback_historical_data(hours, "Missing API credentials")
+        
+        historical_data = {
+            'historical_weather': [],
+            'data_quality': {'source': 'accuweather_historical', 'issues': []}
+        }
+        
+        success = await self._get_accuweather_historical(api_key, location_key, historical_data, hours)
+        
+        if not success:
+            logger.error("❌ AccuWeather historical API failure - using fallback data")
+            return self._get_fallback_historical_data(hours, "API failure")
+        
+        logger.info(f"✅ Historical weather data retrieved: {len(historical_data['historical_weather'])} hours")
+        return historical_data
+
+    async def _get_accuweather_historical(self, api_key: str, location_key: str, historical_data: Dict, hours: int, retries: int = 2) -> bool:
+        """Get historical conditions from AccuWeather with retry logic"""
+        historical_url = f"http://dataservice.accuweather.com/currentconditions/v1/{location_key}/historical"
+        
+        for attempt in range(retries + 1):
+            try:
+                params = {
+                    'apikey': api_key, 
+                    'details': 'true'
+                }
+                timeout = aiohttp.ClientTimeout(total=20)
+                
+                async with self.session.get(historical_url, params=params, timeout=timeout) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data and len(data) > 0:
+                            valid_hours = 0
+                            now = datetime.now()
+                            cutoff_time = now - timedelta(hours=hours)
+                            
+                            for hour_data in data:
+                                try:
+                                    # Parse the timestamp
+                                    timestamp = datetime.fromisoformat(hour_data['LocalObservationDateTime'].replace('Z', '+00:00'))
+                                    
+                                    # Only include data within our requested timeframe
+                                    if timestamp < cutoff_time:
+                                        continue
+                                    
+                                    temp = hour_data['Temperature']['Imperial']['Value']
+                                    humidity = hour_data['RelativeHumidity']
+                                    
+                                    # Validate historical data
+                                    if not (-50 <= temp <= 150):
+                                        logger.warning(f"Skipping invalid historical temperature: {temp}°F")
+                                        continue
+                                        
+                                    if not (0 <= humidity <= 100):
+                                        humidity = max(0, min(100, humidity))  # Clamp humidity
+                                        
+                                    historical_data['historical_weather'].append({
+                                        'timestamp': timestamp,
+                                        'temperature': temp,
+                                        'humidity': humidity,
+                                        'solar_irradiance': self._calculate_solar_irradiance(hour_data),
+                                        'precipitation': hour_data.get('Precipitation', {}).get('Imperial', {}).get('Value', 0)
+                                    })
+                                    valid_hours += 1
+                                    
+                                except Exception as e:
+                                    logger.warning(f"Skipping invalid historical hour: {e}")
+                                    continue
+                                    
+                            if valid_hours > 0:
+                                # Sort by timestamp (oldest first)
+                                historical_data['historical_weather'].sort(key=lambda x: x['timestamp'])
+                                logger.info(f"✅ AccuWeather historical: {valid_hours} valid hours retrieved")
+                                return True
+                            else:
+                                logger.warning("No valid historical hours found")
+                                
+                    elif resp.status == 401:
+                        logger.error("❌ AccuWeather API authentication failed - check API key")
+                        return False
+                    elif resp.status == 403:
+                        logger.error("❌ AccuWeather API quota exceeded or forbidden")
+                        return False
+                    elif resp.status == 503:
+                        logger.warning(f"AccuWeather historical service temporarily unavailable (503) - attempt {attempt + 1}")
+                        if attempt < retries:
+                            await asyncio.sleep(5 + (2 ** attempt))
+                            continue
+                    else:
+                        logger.warning(f"AccuWeather historical failed: HTTP {resp.status} on attempt {attempt + 1}")
+                        
+            except asyncio.TimeoutError:
+                logger.warning(f"Timeout getting AccuWeather historical data on attempt {attempt + 1}")
+            except Exception as e:
+                logger.warning(f"Error getting AccuWeather historical data on attempt {attempt + 1}: {e}")
+                
+            # Wait before retry
+            if attempt < retries:
+                await asyncio.sleep(2 ** attempt)
+                
+        return False
+
+    def _get_fallback_historical_data(self, hours: int, reason: str) -> Dict:
+        """Generate fallback historical data when AccuWeather historical is unavailable"""
+        logger.info(f"🔄 Generating fallback historical data - Reason: {reason}")
+        
+        # Generate synthetic historical data based on current conditions and trends
+        now = datetime.now()
+        current_temp = 70.0  # Default temperature
+        
+        # Try to get current outdoor temperature from sensors if available
+        try:
+            if hasattr(self, '_last_outdoor_temp'):
+                current_temp = getattr(self, '_last_outdoor_temp', 70.0)
+        except:
+            pass
+        
+        historical_data = {
+            'historical_weather': [],
+            'data_quality': {
+                'source': 'estimated_historical',
+                'issues': [f'AccuWeather historical unavailable: {reason}', 'Using synthetic historical data']
+            }
+        }
+        
+        # Generate hourly data going backwards
+        for i in range(hours):
+            timestamp = now - timedelta(hours=hours - i)
+            
+            # Add some realistic variation to the temperature
+            temp_variation = math.sin(i * 0.5) * 3  # ±3°F variation
+            estimated_temp = current_temp + temp_variation
+            
+            historical_data['historical_weather'].append({
+                'timestamp': timestamp,
+                'temperature': estimated_temp,
+                'humidity': 50.0 + (i % 20),  # Vary humidity 50-70%
+                'solar_irradiance': self._estimate_solar_irradiance_simple(timestamp),
+                'precipitation': 0.0
+            })
+        
+        logger.info(f"✅ Generated {hours} hours of synthetic historical data")
+        return historical_data
 
     def _get_fallback_weather_data(self, reason: str) -> Dict:
         """Generate fallback weather data when AccuWeather is unavailable"""

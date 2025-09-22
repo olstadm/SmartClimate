@@ -240,6 +240,210 @@ class ThermalModel:
         h_in = 1.006 * t_in + w_in * (2501 + 1.86 * t_in)
         
         return (h_out - h_in) / 100.0  # Scaled
+
+    def analyze_temperature_trends(self, historical_weather: List[Dict], current_conditions: Dict) -> Dict:
+        """
+        Analyze temperature trends from historical data to inform predictions
+        
+        Args:
+            historical_weather: List of historical weather data points
+            current_conditions: Current sensor/weather conditions
+            
+        Returns:
+            Dict with trend analysis results
+        """
+        try:
+            logger.info("📈 Analyzing temperature trends from historical data...")
+            
+            if not historical_weather or len(historical_weather) < 2:
+                logger.warning("⚠️ Insufficient historical data for trend analysis")
+                return self._get_fallback_trend_analysis()
+            
+            # Extract temperature time series
+            timestamps = []
+            outdoor_temps = []
+            
+            for point in historical_weather:
+                if 'timestamp' in point and 'temperature' in point:
+                    timestamps.append(point['timestamp'])
+                    outdoor_temps.append(point['temperature'])
+            
+            if len(outdoor_temps) < 2:
+                logger.warning("⚠️ Insufficient temperature data points")
+                return self._get_fallback_trend_analysis()
+            
+            # Calculate outdoor temperature trend (°F/hour)
+            time_hours = [(ts - timestamps[0]).total_seconds() / 3600 for ts in timestamps]
+            outdoor_trend = np.polyfit(time_hours, outdoor_temps, 1)[0] if len(time_hours) > 1 else 0
+            
+            # Calculate temperature variation and stability
+            outdoor_std = np.std(outdoor_temps)
+            outdoor_range = max(outdoor_temps) - min(outdoor_temps)
+            
+            # Predict expected indoor response based on outdoor trends
+            current_outdoor = current_conditions.get('outdoor_temp', 70.0)
+            current_indoor = current_conditions.get('indoor_temp', 70.0)
+            
+            # Use thermal model parameters to predict indoor response
+            thermal_coupling = abs(self.rls.theta[0]) if len(self.rls.theta) > 0 else 0.1  # 'a' parameter
+            expected_indoor_trend = outdoor_trend * thermal_coupling * 0.5  # Damped response
+            
+            # Calculate trend alignment score (how well indoor should follow outdoor)
+            if abs(outdoor_trend) > 0.5:  # Significant outdoor trend
+                alignment_strength = "strong" if abs(outdoor_trend) > 2.0 else "moderate"
+            else:
+                alignment_strength = "weak"
+            
+            trend_analysis = {
+                'outdoor_trend': {
+                    'rate_per_hour': round(outdoor_trend, 3),
+                    'direction': 'rising' if outdoor_trend > 0.2 else 'falling' if outdoor_trend < -0.2 else 'stable',
+                    'stability': 'stable' if outdoor_std < 2.0 else 'variable' if outdoor_std < 5.0 else 'unstable',
+                    'temperature_range': round(outdoor_range, 1)
+                },
+                'expected_indoor_response': {
+                    'predicted_trend': round(expected_indoor_trend, 3),
+                    'coupling_strength': alignment_strength,
+                    'thermal_lag_hours': round(1 / thermal_coupling, 1) if thermal_coupling > 0 else 8.0
+                },
+                'trend_validation': {
+                    'outdoor_rising_indoor_should_follow': outdoor_trend > 0.5,
+                    'outdoor_falling_indoor_should_follow': outdoor_trend < -0.5,
+                    'significant_trend_detected': abs(outdoor_trend) > 0.5,
+                    'coupling_factor': thermal_coupling
+                },
+                'data_quality': {
+                    'historical_points': len(historical_weather),
+                    'time_span_hours': round(max(time_hours) - min(time_hours), 1),
+                    'temperature_reliability': 'high' if outdoor_std < 3.0 else 'medium' if outdoor_std < 6.0 else 'low'
+                }
+            }
+            
+            logger.info(f"✅ Trend analysis complete - Outdoor: {outdoor_trend:+.2f}°F/hr, Expected indoor response: {expected_indoor_trend:+.2f}°F/hr")
+            return trend_analysis
+            
+        except Exception as e:
+            logger.error(f"Error in trend analysis: {e}", exc_info=True)
+            return self._get_fallback_trend_analysis()
+
+    def _get_fallback_trend_analysis(self) -> Dict:
+        """Return fallback trend analysis when data is insufficient"""
+        return {
+            'outdoor_trend': {
+                'rate_per_hour': 0.0,
+                'direction': 'stable',
+                'stability': 'unknown',
+                'temperature_range': 0.0
+            },
+            'expected_indoor_response': {
+                'predicted_trend': 0.0,
+                'coupling_strength': 'unknown',
+                'thermal_lag_hours': 6.0
+            },
+            'trend_validation': {
+                'outdoor_rising_indoor_should_follow': False,
+                'outdoor_falling_indoor_should_follow': False,
+                'significant_trend_detected': False,
+                'coupling_factor': 0.1
+            },
+            'data_quality': {
+                'historical_points': 0,
+                'time_span_hours': 0.0,
+                'temperature_reliability': 'low'
+            }
+        }
+
+    def validate_prediction_against_trends(self, prediction: float, trend_analysis: Dict, 
+                                         current_conditions: Dict, time_hours: float) -> Dict:
+        """
+        Validate a temperature prediction against expected trends and apply corrections
+        
+        Args:
+            prediction: Predicted temperature
+            trend_analysis: Results from analyze_temperature_trends
+            current_conditions: Current sensor conditions
+            time_hours: Prediction time horizon in hours
+            
+        Returns:
+            Dict with validation results and corrected prediction
+        """
+        try:
+            current_indoor = current_conditions.get('indoor_temp', 70.0)
+            outdoor_trend = trend_analysis['outdoor_trend']['rate_per_hour']
+            expected_response = trend_analysis['expected_indoor_response']['predicted_trend']
+            
+            # Calculate expected change based on trends
+            expected_change = expected_response * time_hours
+            expected_temp = current_indoor + expected_change
+            
+            # Calculate prediction error vs trend expectation
+            trend_error = abs(prediction - expected_temp)
+            
+            # Determine if correction is needed
+            needs_correction = False
+            correction_reason = ""
+            
+            # Check for illogical predictions
+            if trend_analysis['trend_validation']['significant_trend_detected']:
+                if outdoor_trend > 0.5 and prediction < current_indoor - 1.0:
+                    needs_correction = True
+                    correction_reason = f"Outdoor rising ({outdoor_trend:+.2f}°F/hr) but prediction shows indoor falling"
+                elif outdoor_trend < -0.5 and prediction > current_indoor + 1.0:
+                    needs_correction = True
+                    correction_reason = f"Outdoor falling ({outdoor_trend:+.2f}°F/hr) but prediction shows indoor rising"
+            
+            # Apply correction if needed
+            corrected_prediction = prediction
+            if needs_correction:
+                # Blend original prediction with trend-based expectation
+                blend_factor = 0.3  # 30% trend correction, 70% original model
+                corrected_prediction = prediction * (1 - blend_factor) + expected_temp * blend_factor
+                logger.warning(f"🔧 Trend correction applied: {prediction:.1f}°F → {corrected_prediction:.1f}°F")
+                logger.warning(f"   Reason: {correction_reason}")
+            
+            validation_result = {
+                'original_prediction': prediction,
+                'corrected_prediction': corrected_prediction,
+                'trend_expected_temp': expected_temp,
+                'trend_error': trend_error,
+                'correction_applied': needs_correction,
+                'correction_reason': correction_reason,
+                'confidence_score': self._calculate_prediction_confidence(trend_analysis, trend_error)
+            }
+            
+            return validation_result
+            
+        except Exception as e:
+            logger.error(f"Error in prediction validation: {e}", exc_info=True)
+            return {
+                'original_prediction': prediction,
+                'corrected_prediction': prediction,
+                'trend_expected_temp': prediction,
+                'trend_error': 0.0,
+                'correction_applied': False,
+                'correction_reason': "Validation error",
+                'confidence_score': 0.5
+            }
+
+    def _calculate_prediction_confidence(self, trend_analysis: Dict, trend_error: float) -> float:
+        """Calculate confidence score for prediction based on trend alignment"""
+        base_confidence = 0.7
+        
+        # Reduce confidence for high trend errors
+        error_penalty = min(0.3, trend_error * 0.1)
+        
+        # Increase confidence for good data quality
+        data_quality = trend_analysis['data_quality']['temperature_reliability']
+        quality_bonus = {'high': 0.2, 'medium': 0.1, 'low': 0.0}.get(data_quality, 0.0)
+        
+        # Adjust for trend strength
+        if trend_analysis['trend_validation']['significant_trend_detected']:
+            trend_bonus = 0.1
+        else:
+            trend_bonus = 0.0
+            
+        confidence = base_confidence - error_penalty + quality_bonus + trend_bonus
+        return max(0.1, min(1.0, confidence))
         
     def predict_temperature_change(self, t_in: float, t_out: float,
                                   h_in: float, h_out: float,

@@ -45,21 +45,35 @@ class ForecastEngine:
         
     async def generate_forecast(self, current_data: Dict, weather_forecast: Dict, timezone_name: str = 'UTC') -> Dict:
         """
-        Generate temperature forecast for next 12 hours
+        Generate enhanced temperature forecast with historical context and trend analysis
         
         Args:
             current_data: Current sensor readings
-            weather_forecast: Weather forecast data from AccuWeather
+            weather_forecast: Weather forecast data from AccuWeather (includes historical_weather if available)
             
         Returns:
-            Forecast results with multiple trajectories
+            Enhanced forecast results with 18-hour timeline and trend validation
         """
         try:
-            logger.info("=== Starting Forecast Generation ===")
+            logger.info("=== Starting Enhanced Forecast Generation ===")
             logger.info(f"Current data keys: {list(current_data.keys())}")
             logger.info(f"Current indoor temp: {current_data.get('indoor_temp')}°F")
             logger.info(f"Current outdoor temp: {current_data.get('outdoor_temp')}°F")
             logger.info(f"Weather forecast keys: {list(weather_forecast.keys())}")
+            
+            # Extract and analyze historical data for trend analysis
+            historical_weather = weather_forecast.get('historical_weather', [])
+            logger.info(f"Historical weather data points: {len(historical_weather)}")
+            
+            # Perform trend analysis
+            trend_analysis = None
+            if historical_weather:
+                trend_analysis = self.thermal_model.analyze_temperature_trends(
+                    historical_weather, current_data
+                )
+                logger.info(f"✅ Trend analysis complete - Outdoor trend: {trend_analysis['outdoor_trend']['rate_per_hour']:+.2f}°F/hr")
+            else:
+                logger.warning("⚠️ No historical data available - trend analysis limited")
             
             if 'current_outdoor' in weather_forecast:
                 current_outdoor = weather_forecast['current_outdoor']
@@ -76,13 +90,19 @@ class ForecastEngine:
             else:
                 logger.warning("No hourly_forecast data from AccuWeather")
             
-            # Prepare outdoor conditions series
-            logger.info("Preparing outdoor conditions series...")
-            outdoor_series = self._prepare_outdoor_series(current_data, weather_forecast, timezone_name)
-            logger.info(f"Generated outdoor series with {len(outdoor_series)} points")
+            # Prepare extended outdoor series (historical + current + forecast)
+            logger.info("Preparing extended outdoor conditions series...")
+            outdoor_series = self._prepare_extended_outdoor_series(
+                current_data, weather_forecast, timezone_name, historical_weather
+            )
+            logger.info(f"Generated extended outdoor series with {len(outdoor_series)} points")
             if outdoor_series:
                 logger.info(f"First outdoor point: {outdoor_series[0]['outdoor_temp']}°F at {outdoor_series[0]['timestamp']}")
                 logger.info(f"Last outdoor point: {outdoor_series[-1]['outdoor_temp']}°F at {outdoor_series[-1]['timestamp']}")
+            
+            # Find current time index in the extended series
+            current_time_index = self._find_current_time_index(outdoor_series)
+            logger.info(f"Current time index in extended series: {current_time_index}")
             
             # Initialize state
             initial_state = {
@@ -94,21 +114,34 @@ class ForecastEngine:
             
             # Generate idle trajectory (no HVAC control)
             idle_trajectory = await self._simulate_trajectory(
-                initial_state, outdoor_series, control_mode='idle'
+                initial_state, outdoor_series, control_mode='idle', 
+                current_time_index=current_time_index
             )
             
-            # Generate controlled trajectory (smart HVAC control)
+            # Generate controlled trajectory (smart HVAC control)  
             controlled_trajectory = await self._simulate_trajectory(
-                initial_state, outdoor_series, control_mode='smart'
+                initial_state, outdoor_series, control_mode='smart',
+                current_time_index=current_time_index
             )
             
             # Generate current HVAC trajectory (maintain current state)
             current_trajectory = await self._simulate_trajectory(
                 initial_state, outdoor_series, control_mode='current',
-                fixed_hvac_state=current_data.get('hvac_state', 'off')
+                fixed_hvac_state=current_data.get('hvac_state', 'off'),
+                current_time_index=current_time_index
             )
             
-            # Extract key results
+            # Apply trend validation to predictions
+            if trend_analysis:
+                logger.info("🔧 Applying trend validation to predictions...")
+                controlled_trajectory = self._apply_trend_validation(
+                    controlled_trajectory, trend_analysis, current_data, current_time_index
+                )
+                idle_trajectory = self._apply_trend_validation(
+                    idle_trajectory, trend_analysis, current_data, current_time_index
+                )
+            
+            # Extract key results with extended timeline
             timestamps = [step['timestamp'] for step in idle_trajectory]
             
             result = {
@@ -120,8 +153,16 @@ class ForecastEngine:
                 'controlled_trajectory': controlled_trajectory,
                 'current_trajectory': current_trajectory,
                 'timestamps': timestamps,
+                'current_time_index': current_time_index,
+                'historical_weather': historical_weather,
+                'trend_analysis': trend_analysis,
                 'hvac_schedule': self._extract_hvac_schedule(controlled_trajectory),
-                'forecast_confidence': self._calculate_confidence(outdoor_series)
+                'forecast_confidence': self._calculate_confidence(outdoor_series),
+                'extended_timeline': {
+                    'total_hours': len(outdoor_series) * self.time_step_minutes / 60,
+                    'historical_hours': current_time_index * self.time_step_minutes / 60 if current_time_index else 0,
+                    'future_hours': (len(outdoor_series) - (current_time_index or 0)) * self.time_step_minutes / 60
+                }
             }
             
             return result
@@ -229,7 +270,8 @@ class ForecastEngine:
         
     async def _simulate_trajectory(self, initial_state: Dict, outdoor_series: List[Dict],
                                  control_mode: str = 'idle',
-                                 fixed_hvac_state: Optional[str] = None) -> List[Dict]:
+                                 fixed_hvac_state: Optional[str] = None,
+                                 current_time_index: Optional[int] = None) -> List[Dict]:
         """
         Simulate temperature trajectory
         
@@ -532,3 +574,163 @@ class ForecastEngine:
             )
             
         return recommendations
+
+    def _prepare_extended_outdoor_series(self, current_data: Dict, weather_forecast: Dict, 
+                                       timezone_name: str = 'UTC', historical_weather: List[Dict] = None) -> List[Dict]:
+        """Prepare extended outdoor conditions time series including historical data"""
+        logger.info("=== Preparing Extended Outdoor Conditions Series ===")
+        series = []
+        
+        # Add historical data points (past 6 hours)
+        if historical_weather:
+            logger.info(f"Adding {len(historical_weather)} historical weather points")
+            for hist_point in historical_weather:
+                series.append({
+                    'timestamp': hist_point['timestamp'],
+                    'outdoor_temp': hist_point['temperature'],
+                    'outdoor_humidity': hist_point.get('humidity', 50.0),
+                    'solar_irradiance': hist_point.get('solar_irradiance', 0.0),
+                    'data_type': 'historical'
+                })
+        
+        # Add current point
+        current_outdoor_temp = current_data.get('outdoor_temp')
+        if current_outdoor_temp is None:
+            accuweather_temp = weather_forecast.get('current_outdoor', {}).get('temperature')
+            current_outdoor_temp = accuweather_temp if accuweather_temp is not None else 70.0
+        
+        current_outdoor_humidity = current_data.get('outdoor_humidity')
+        if current_outdoor_humidity is None:
+            accuweather_humidity = weather_forecast.get('current_outdoor', {}).get('humidity')
+            current_outdoor_humidity = accuweather_humidity if accuweather_humidity is not None else 50.0
+            
+        current_time = current_data.get('timestamp', datetime.now())
+        series.append({
+            'timestamp': current_time,
+            'outdoor_temp': current_outdoor_temp,
+            'outdoor_humidity': current_outdoor_humidity,
+            'solar_irradiance': weather_forecast.get('current_outdoor', {}).get('solar_irradiance', 0.0),
+            'data_type': 'current'
+        })
+        
+        # Add forecast data (future 12 hours)
+        if 'hourly_forecast' in weather_forecast and weather_forecast['hourly_forecast']:
+            logger.info(f"Adding {len(weather_forecast['hourly_forecast'])} forecast points")
+            for forecast_point in weather_forecast['hourly_forecast']:
+                series.append({
+                    'timestamp': forecast_point['timestamp'],
+                    'outdoor_temp': forecast_point['temperature'],
+                    'outdoor_humidity': forecast_point.get('humidity', 50.0),
+                    'solar_irradiance': forecast_point.get('solar_irradiance', 0.0),
+                    'data_type': 'forecast'
+                })
+        
+        # Fill gaps and ensure proper time sequence
+        series = sorted(series, key=lambda x: x['timestamp'])
+        series = self._fill_time_gaps(series)
+        
+        logger.info(f"Extended series created: {len(series)} total points")
+        if series:
+            logger.info(f"Time range: {series[0]['timestamp']} to {series[-1]['timestamp']}")
+        
+        return series
+
+    def _find_current_time_index(self, outdoor_series: List[Dict]) -> Optional[int]:
+        """Find the index in outdoor_series that corresponds to current time"""
+        if not outdoor_series:
+            return None
+            
+        current_time = datetime.now()
+        
+        # Find the point closest to current time
+        min_diff = float('inf')
+        current_index = None
+        
+        for i, point in enumerate(outdoor_series):
+            if point.get('data_type') == 'current':
+                return i
+            
+            # Fallback: find closest time to now
+            time_diff = abs((point['timestamp'] - current_time).total_seconds())
+            if time_diff < min_diff:
+                min_diff = time_diff
+                current_index = i
+        
+        return current_index
+
+    def _apply_trend_validation(self, trajectory: List[Dict], trend_analysis: Dict, 
+                              current_conditions: Dict, current_time_index: Optional[int]) -> List[Dict]:
+        """Apply trend validation to a temperature trajectory"""
+        if not trend_analysis or current_time_index is None:
+            return trajectory
+            
+        logger.info("🔧 Applying trend validation to trajectory...")
+        
+        validated_trajectory = []
+        
+        for i, step in enumerate(trajectory):
+            if i < current_time_index:
+                # Historical/current data - don't modify
+                validated_trajectory.append(step)
+                continue
+            
+            # Future predictions - validate against trends
+            time_from_current = (i - current_time_index) * self.time_step_minutes / 60  # hours
+            
+            validation_result = self.thermal_model.validate_prediction_against_trends(
+                step['indoor_temp'], trend_analysis, current_conditions, time_from_current
+            )
+            
+            # Create corrected step
+            corrected_step = step.copy()
+            corrected_step['indoor_temp'] = validation_result['corrected_prediction']
+            corrected_step['trend_validation'] = {
+                'original_prediction': validation_result['original_prediction'],
+                'correction_applied': validation_result['correction_applied'],
+                'correction_reason': validation_result['correction_reason'],
+                'confidence_score': validation_result['confidence_score']
+            }
+            
+            validated_trajectory.append(corrected_step)
+        
+        logger.info(f"✅ Trend validation complete - processed {len(trajectory)} steps")
+        return validated_trajectory
+
+    def _fill_time_gaps(self, series: List[Dict]) -> List[Dict]:
+        """Fill gaps in time series with interpolated values"""
+        if len(series) < 2:
+            return series
+        
+        filled_series = []
+        time_step_seconds = self.time_step_minutes * 60
+        
+        for i in range(len(series)):
+            filled_series.append(series[i])
+            
+            # Check if we need to fill gaps to the next point
+            if i < len(series) - 1:
+                current_time = series[i]['timestamp']
+                next_time = series[i + 1]['timestamp']
+                time_diff = (next_time - current_time).total_seconds()
+                
+                # If gap is larger than time step, fill with interpolated values
+                if time_diff > time_step_seconds * 1.5:
+                    steps_needed = int(time_diff // time_step_seconds) - 1
+                    
+                    for step in range(1, steps_needed + 1):
+                        interp_time = current_time + timedelta(seconds=step * time_step_seconds)
+                        
+                        # Linear interpolation
+                        ratio = step / (steps_needed + 1)
+                        interp_temp = series[i]['outdoor_temp'] + ratio * (series[i + 1]['outdoor_temp'] - series[i]['outdoor_temp'])
+                        interp_humidity = series[i]['outdoor_humidity'] + ratio * (series[i + 1]['outdoor_humidity'] - series[i]['outdoor_humidity'])
+                        
+                        filled_series.append({
+                            'timestamp': interp_time,
+                            'outdoor_temp': interp_temp,
+                            'outdoor_humidity': interp_humidity,
+                            'solar_irradiance': 0.0,
+                            'data_type': 'interpolated'
+                        })
+        
+        return filled_series
