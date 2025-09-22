@@ -43,22 +43,45 @@ class HomeForecastDashboard {
             // Show loading indicators
             this.showLoading(true);
 
-            // Fetch all data in parallel
-            const [status, forecast, comfort, parameters, statistics] = await Promise.all([
-                this.fetchStatus(),
-                this.fetchForecast(),
-                this.fetchComfortAnalysis(),
-                this.fetchModelParameters(),
-                this.fetchStatistics()
+            // Fetch required data (status, parameters, statistics)
+            const statusPromise = this.fetchStatus();
+            const parametersPromise = this.fetchModelParameters();
+            const statisticsPromise = this.fetchStatistics();
+
+            // Fetch optional data (forecast, comfort analysis)
+            const forecastPromise = this.fetchForecast().catch(e => {
+                console.warn('Forecast not available:', e);
+                return null;
+            });
+            const comfortPromise = this.fetchComfortAnalysis().catch(e => {
+                console.warn('Comfort analysis not available:', e);
+                return null;
+            });
+
+            // Wait for all promises
+            const [status, parameters, statistics, forecast, comfort] = await Promise.all([
+                statusPromise,
+                parametersPromise, 
+                statisticsPromise,
+                forecastPromise,
+                comfortPromise
             ]);
 
             // Update UI with fetched data
             console.log('API responses:', { status, forecast, comfort, parameters, statistics });
-            this.updateStatus(status);
-            this.updateForecast(forecast);
-            this.updateComfort(comfort);
-            this.updateParameters(parameters);
-            this.updateStatistics(statistics);
+            
+            // Update each section individually with error handling
+            try { this.updateStatus(status); } catch (e) { console.error('Error updating status:', e); }
+            try { this.updateParameters(parameters); } catch (e) { console.error('Error updating parameters:', e); }
+            try { this.updateStatistics(statistics); } catch (e) { console.error('Error updating statistics:', e); }
+            
+            if (forecast) {
+                try { this.updateForecast(forecast); } catch (e) { console.error('Error updating forecast:', e); }
+            }
+            
+            if (comfort) {
+                try { this.updateComfort(comfort); } catch (e) { console.error('Error updating comfort:', e); }
+            }
 
         } catch (error) {
             console.error('Error loading data:', error);
@@ -69,34 +92,80 @@ class HomeForecastDashboard {
     }
 
     async fetchStatus() {
-        const response = await fetch('/api/status');
-        return response.json();
+        try {
+            const response = await fetch('/api/status');
+            if (!response.ok) {
+                throw new Error(`Status fetch failed: ${response.status}`);
+            }
+            const data = await response.json();
+            console.log('Status data:', data);
+            return data;
+        } catch (error) {
+            console.error('Error fetching status:', error);
+            throw error;
+        }
     }
 
     async fetchForecast() {
-        const response = await fetch('/api/forecast/latest');
-        if (response.ok) {
-            return response.json();
+        try {
+            const response = await fetch('/api/forecast/latest');
+            if (!response.ok) {
+                console.warn(`Forecast fetch failed: ${response.status}`);
+                return null;
+            }
+            const data = await response.json();
+            console.log('Forecast data:', data);
+            return data;
+        } catch (error) {
+            console.error('Error fetching forecast:', error);
+            return null;
         }
-        return null;
     }
 
     async fetchComfortAnalysis() {
-        const response = await fetch('/api/comfort/analysis');
-        if (response.ok) {
-            return response.json();
+        try {
+            const response = await fetch('/api/comfort/analysis');
+            if (!response.ok) {
+                console.warn(`Comfort analysis fetch failed: ${response.status}`);
+                return null;
+            }
+            const data = await response.json();
+            console.log('Comfort analysis data:', data);
+            return data;
+        } catch (error) {
+            console.error('Error fetching comfort analysis:', error);
+            return null;
         }
-        return null;
     }
 
     async fetchModelParameters() {
-        const response = await fetch('/api/model/parameters');
-        return response.json();
+        try {
+            const response = await fetch('/api/model/parameters');
+            if (!response.ok) {
+                throw new Error(`Model parameters fetch failed: ${response.status}`);
+            }
+            const data = await response.json();
+            console.log('Model parameters data:', data);
+            return data;
+        } catch (error) {
+            console.error('Error fetching model parameters:', error);
+            throw error;
+        }
     }
 
     async fetchStatistics() {
-        const response = await fetch('/api/statistics');
-        return response.json();
+        try {
+            const response = await fetch('/api/statistics');
+            if (!response.ok) {
+                throw new Error(`Statistics fetch failed: ${response.status}`);
+            }
+            const data = await response.json();
+            console.log('Statistics data:', data);
+            return data;
+        } catch (error) {
+            console.error('Error fetching statistics:', error);
+            throw error;
+        }
     }
 
     updateStatus(status) {
@@ -227,7 +296,7 @@ class HomeForecastDashboard {
                         label: function(context) {
                             let label = context.dataset.label || '';
                             if (label) label += ': ';
-                            label += context.parsed.y.toFixed(1) + '°C';
+                            label += context.parsed.y.toFixed(1) + '°F';
                             return label;
                         }
                     }
@@ -245,11 +314,11 @@ class HomeForecastDashboard {
                     display: true,
                     title: {
                         display: true,
-                        text: 'Temperature (°C)'
+                        text: 'Temperature (°F)'
                     },
                     ticks: {
                         callback: function(value) {
-                            return value + '°C';
+                            return value + '°F';
                         }
                     }
                 }
@@ -348,20 +417,33 @@ class HomeForecastDashboard {
     }
 
     updateComfort(comfort) {
-        if (!comfort) return;
+        console.log('updateComfort called with:', comfort);
+        
+        if (!comfort) {
+            console.log('No comfort data received');
+            return;
+        }
 
         // Update comfort metrics
-        document.getElementById('recommendedMode').textContent = 
-            comfort.recommended_mode ? comfort.recommended_mode.toUpperCase() : 'OFF';
+        const recommendedModeEl = document.getElementById('recommendedMode');
+        if (recommendedModeEl) {
+            recommendedModeEl.textContent = comfort.recommended_mode ? comfort.recommended_mode.toUpperCase() : 'OFF';
+        }
         
-        document.getElementById('timeToUpper').textContent = 
-            comfort.time_to_upper ? comfort.time_to_upper.toFixed(0) + ' min' : 'N/A';
+        const timeToUpperEl = document.getElementById('timeToUpper');
+        if (timeToUpperEl) {
+            timeToUpperEl.textContent = comfort.time_to_upper ? comfort.time_to_upper.toFixed(0) + ' min' : 'N/A';
+        }
         
-        document.getElementById('timeToLower').textContent = 
-            comfort.time_to_lower ? comfort.time_to_lower.toFixed(0) + ' min' : 'N/A';
+        const timeToLowerEl = document.getElementById('timeToLower');
+        if (timeToLowerEl) {
+            timeToLowerEl.textContent = comfort.time_to_lower ? comfort.time_to_lower.toFixed(0) + ' min' : 'N/A';
+        }
         
-        document.getElementById('comfortScore').textContent = 
-            comfort.comfort_score ? comfort.comfort_score.toFixed(0) + '%' : 'N/A';
+        const comfortScoreEl = document.getElementById('comfortScore');
+        if (comfortScoreEl) {
+            comfortScoreEl.textContent = comfort.comfort_score ? comfort.comfort_score.toFixed(0) + '%' : 'N/A';
+        }
 
         // Update recommendations
         this.updateRecommendations(comfort.recommendations || []);
@@ -403,27 +485,44 @@ class HomeForecastDashboard {
     }
 
     updateParameters(params) {
-        if (!params.thermal_model) return;
-
-        const model = params.thermal_model;
+        console.log('updateParameters called with:', params);
         
-        // Update thermal parameters
-        document.getElementById('timeConstant').textContent = 
-            model.time_constant.toFixed(1) + ' hours';
-        document.getElementById('heatingRate').textContent = 
-            model.heating_rate.toFixed(2) + ' °C/hr';
-        document.getElementById('coolingRate').textContent = 
-            model.cooling_rate.toFixed(2) + ' °C/hr';
+        if (!params) {
+            console.log('No parameters data received');
+            return;
+        }
+
+        // Handle both nested and flat parameter structures
+        const model = params.thermal_model || params;
+        
+        // Update thermal parameters (convert hours to more readable format)
+        const timeConstantEl = document.getElementById('timeConstant');
+        if (timeConstantEl && model.time_constant !== undefined) {
+            const hours = parseFloat(model.time_constant);
+            timeConstantEl.textContent = hours.toFixed(1) + ' hours';
+        }
+        
+        const heatingRateEl = document.getElementById('heatingRate');
+        if (heatingRateEl && model.heating_rate !== undefined) {
+            heatingRateEl.textContent = model.heating_rate.toFixed(2) + ' °F/hr';
+        }
+        
+        const coolingRateEl = document.getElementById('coolingRate');
+        if (coolingRateEl && model.cooling_rate !== undefined) {
+            coolingRateEl.textContent = model.cooling_rate.toFixed(2) + ' °F/hr';
+        }
 
         // Update model quality
-        if (params.model_quality) {
-            const quality = params.model_quality;
-            document.getElementById('modelConvergence').textContent = 
-                quality.parameter_convergence ? 'Converged' : 'Learning';
+        const quality = params.model_quality || params.quality;
+        if (quality) {
+            const convergenceEl = document.getElementById('modelConvergence');
+            if (convergenceEl) {
+                convergenceEl.textContent = quality.parameter_convergence ? 'Converged' : 'Learning';
+            }
             
-            if (quality.mae !== null) {
-                document.getElementById('modelError').textContent = 
-                    quality.mae.toFixed(3) + ' °C/hr';
+            const errorEl = document.getElementById('modelError');
+            if (errorEl && quality.mae !== null && quality.mae !== undefined) {
+                errorEl.textContent = quality.mae.toFixed(3) + ' °F/hr';
             }
         }
 
@@ -503,10 +602,19 @@ class HomeForecastDashboard {
     }
 
     showLoading(show) {
-        const elements = document.querySelectorAll('.metric-value, .status');
+        const elements = document.querySelectorAll('.metric-value');
         elements.forEach(el => {
             if (show) {
+                // Store original content before showing spinner
+                if (!el.hasAttribute('data-original-content')) {
+                    el.setAttribute('data-original-content', el.innerHTML);
+                }
                 el.innerHTML = '<span class="spinner"></span>';
+                el.classList.add('loading');
+            } else {
+                // Remove loading state
+                el.classList.remove('loading');
+                // Don't restore original content - let the update methods handle it
             }
         });
     }
