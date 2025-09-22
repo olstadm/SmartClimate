@@ -223,48 +223,58 @@ class HomeForecastDashboard {
         const ctx = document.getElementById('forecastChart');
         if (!ctx) return;
 
+        console.log('Updating forecast chart with data:', data);
+
+        // Process HVAC operation periods for annotations
+        const hvacPeriods = this.extractHvacPeriods(data);
+        console.log('Extracted HVAC periods:', hvacPeriods);
+
         const chartData = {
             labels: data.timestamps.map(ts => 
                 new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
             ),
             datasets: [
                 {
-                    label: 'Indoor (Smart Control)',
+                    label: 'Projected Indoor (Smart HVAC)',
                     data: data.controlled_trajectory.map(p => p.indoor_temp),
                     borderColor: '#2196F3',
                     backgroundColor: 'rgba(33, 150, 243, 0.1)',
                     tension: 0.4,
-                    pointRadius: 0,
-                    borderWidth: 2
+                    pointRadius: 3,
+                    borderWidth: 3,
+                    fill: false
                 },
                 {
-                    label: 'Indoor (No HVAC)',
-                    data: data.idle_trajectory.map(p => p.indoor_temp),
-                    borderColor: '#F44336',
-                    backgroundColor: 'rgba(244, 67, 54, 0.1)',
-                    borderDash: [5, 5],
-                    tension: 0.4,
-                    pointRadius: 0,
-                    borderWidth: 2
-                },
-                {
-                    label: 'Indoor (Current)',
-                    data: data.current_trajectory.map(p => p.indoor_temp),
-                    borderColor: '#FF9800',
-                    backgroundColor: 'rgba(255, 152, 0, 0.1)',
-                    borderDash: [2, 2],
-                    tension: 0.4,
-                    pointRadius: 0,
-                    borderWidth: 2
-                },
-                {
-                    label: 'Outdoor',
+                    label: 'Forecasted Outdoor',
                     data: data.outdoor_forecast,
                     borderColor: '#4CAF50',
                     backgroundColor: 'rgba(76, 175, 80, 0.1)',
                     tension: 0.4,
+                    pointRadius: 2,
+                    borderWidth: 2,
+                    fill: false
+                },
+                {
+                    label: 'Indoor (No HVAC Control)',
+                    data: data.idle_trajectory.map(p => p.indoor_temp),
+                    borderColor: '#F44336',
+                    backgroundColor: 'rgba(244, 67, 54, 0.1)',
+                    borderDash: [8, 4],
+                    tension: 0.4,
                     pointRadius: 0,
-                    borderWidth: 2
+                    borderWidth: 2,
+                    fill: false
+                },
+                {
+                    label: 'Indoor (Current Trajectory)',
+                    data: data.current_trajectory ? data.current_trajectory.map(p => p.indoor_temp) : [],
+                    borderColor: '#FF9800',
+                    backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                    borderDash: [4, 2],
+                    tension: 0.4,
+                    pointRadius: 0,
+                    borderWidth: 1,
+                    fill: false
                 }
             ]
         };
@@ -279,25 +289,54 @@ class HomeForecastDashboard {
             plugins: {
                 title: {
                     display: true,
-                    text: '12-Hour Temperature Forecast',
-                    font: { size: 16 }
+                    text: 'Smart HVAC Temperature Forecast & Control Schedule',
+                    font: { size: 18, weight: 'bold' }
                 },
                 legend: {
                     position: 'bottom',
                     labels: {
                         usePointStyle: true,
-                        padding: 15
+                        padding: 20,
+                        font: { size: 12 }
                     }
                 },
                 tooltip: {
                     mode: 'index',
                     intersect: false,
                     callbacks: {
+                        title: function(tooltipItems) {
+                            const index = tooltipItems[0].dataIndex;
+                            const timestamp = data.timestamps[index];
+                            return new Date(timestamp).toLocaleString();
+                        },
                         label: function(context) {
                             let label = context.dataset.label || '';
                             if (label) label += ': ';
                             label += context.parsed.y.toFixed(1) + '°F';
+                            
+                            // Add HVAC state info for controlled trajectory
+                            if (context.dataset.label === 'Projected Indoor (Smart HVAC)' && 
+                                data.controlled_trajectory[context.dataIndex]) {
+                                const hvacState = data.controlled_trajectory[context.dataIndex].hvac_state;
+                                if (hvacState && hvacState !== 'off') {
+                                    label += ` (HVAC: ${hvacState.toUpperCase()})`;
+                                }
+                            }
+                            
                             return label;
+                        },
+                        afterBody: function(tooltipItems) {
+                            const index = tooltipItems[0].dataIndex;
+                            const timestamp = new Date(data.timestamps[index]);
+                            
+                            // Get comfort band info
+                            const comfortMin = parseFloat(document.getElementById('comfortMin')?.textContent || 0);
+                            const comfortMax = parseFloat(document.getElementById('comfortMax')?.textContent || 0);
+                            
+                            if (comfortMin && comfortMax) {
+                                return [`Comfort Range: ${comfortMin}°F - ${comfortMax}°F`];
+                            }
+                            return [];
                         }
                     }
                 }
@@ -307,45 +346,122 @@ class HomeForecastDashboard {
                     display: true,
                     title: {
                         display: true,
-                        text: 'Time'
+                        text: 'Time of Day',
+                        font: { size: 14, weight: 'bold' }
+                    },
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.1)'
                     }
                 },
                 y: {
                     display: true,
                     title: {
                         display: true,
-                        text: 'Temperature (°F)'
+                        text: 'Temperature (°F)',
+                        font: { size: 14, weight: 'bold' }
+                    },
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.1)'
                     },
                     ticks: {
                         callback: function(value) {
-                            return value + '°F';
+                            return value.toFixed(0) + '°F';
                         }
                     }
                 }
             }
         };
 
-        // Add comfort zone annotation
-        const comfortMin = parseFloat(document.getElementById('comfortMin').textContent);
-        const comfortMax = parseFloat(document.getElementById('comfortMax').textContent);
+        // Get comfort band values
+        const comfortMinEl = document.getElementById('comfortMin');
+        const comfortMaxEl = document.getElementById('comfortMax');
         
-        options.plugins.annotation = {
-            annotations: {
-                comfortZone: {
-                    type: 'box',
-                    yMin: comfortMin,
-                    yMax: comfortMax,
-                    backgroundColor: 'rgba(76, 175, 80, 0.1)',
-                    borderColor: 'rgba(76, 175, 80, 0.3)',
-                    borderWidth: 1,
-                    label: {
-                        content: 'Comfort Zone',
-                        enabled: true,
-                        position: 'start'
-                    }
+        let comfortMin = 68; // Default values
+        let comfortMax = 74;
+        
+        if (comfortMinEl && comfortMaxEl) {
+            comfortMin = parseFloat(comfortMinEl.textContent.replace('°F', '')) || 68;
+            comfortMax = parseFloat(comfortMaxEl.textContent.replace('°F', '')) || 74;
+        }
+
+        // Create comprehensive annotations
+        const annotations = {
+            // Comfort band background
+            comfortZone: {
+                type: 'box',
+                yMin: comfortMin,
+                yMax: comfortMax,
+                backgroundColor: 'rgba(76, 175, 80, 0.15)',
+                borderColor: 'rgba(76, 175, 80, 0.4)',
+                borderWidth: 2,
+                borderDash: [3, 3],
+                label: {
+                    content: `Comfort Band (${comfortMin}°F - ${comfortMax}°F)`,
+                    enabled: true,
+                    position: 'start',
+                    backgroundColor: 'rgba(76, 175, 80, 0.8)',
+                    color: 'white',
+                    font: { size: 11, weight: 'bold' },
+                    padding: 6
+                }
+            },
+            // Comfort zone boundaries
+            comfortMin: {
+                type: 'line',
+                yMin: comfortMin,
+                yMax: comfortMin,
+                borderColor: 'rgba(76, 175, 80, 0.8)',
+                borderWidth: 2,
+                borderDash: [5, 5],
+                label: {
+                    content: `Min Comfort: ${comfortMin}°F`,
+                    enabled: true,
+                    position: 'end',
+                    backgroundColor: 'rgba(76, 175, 80, 0.9)',
+                    color: 'white',
+                    font: { size: 10 }
+                }
+            },
+            comfortMax: {
+                type: 'line',
+                yMin: comfortMax,
+                yMax: comfortMax,
+                borderColor: 'rgba(76, 175, 80, 0.8)',
+                borderWidth: 2,
+                borderDash: [5, 5],
+                label: {
+                    content: `Max Comfort: ${comfortMax}°F`,
+                    enabled: true,
+                    position: 'end',
+                    backgroundColor: 'rgba(76, 175, 80, 0.9)',
+                    color: 'white',
+                    font: { size: 10 }
                 }
             }
         };
+
+        // Add HVAC operation period annotations
+        hvacPeriods.forEach((period, index) => {
+            annotations[`hvac_${index}`] = {
+                type: 'box',
+                xMin: period.startIndex - 0.4,
+                xMax: period.endIndex + 0.4,
+                backgroundColor: period.color,
+                borderColor: period.borderColor,
+                borderWidth: 2,
+                label: {
+                    content: `${period.mode.toUpperCase()}: ${period.startTime} - ${period.endTime}`,
+                    enabled: true,
+                    position: 'center',
+                    backgroundColor: period.borderColor,
+                    color: 'white',
+                    font: { size: 9, weight: 'bold' },
+                    padding: 4
+                }
+            };
+        });
+
+        options.plugins.annotation = { annotations };
 
         if (this.charts.forecast) {
             this.charts.forecast.destroy();
@@ -356,6 +472,57 @@ class HomeForecastDashboard {
             data: chartData,
             options: options
         });
+    }
+
+    extractHvacPeriods(data) {
+        if (!data.controlled_trajectory || data.controlled_trajectory.length === 0) {
+            return [];
+        }
+
+        const periods = [];
+        let currentPeriod = null;
+        
+        data.controlled_trajectory.forEach((point, index) => {
+            const hvacState = point.hvac_state || 'off';
+            const timestamp = data.timestamps[index];
+            const timeStr = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            
+            if (hvacState !== 'off') {
+                if (!currentPeriod || currentPeriod.mode !== hvacState) {
+                    // Start new period
+                    if (currentPeriod) {
+                        periods.push(currentPeriod);
+                    }
+                    
+                    currentPeriod = {
+                        mode: hvacState,
+                        startIndex: index,
+                        startTime: timeStr,
+                        endIndex: index,
+                        endTime: timeStr,
+                        color: hvacState === 'heat' ? 'rgba(255, 87, 34, 0.2)' : 'rgba(33, 150, 243, 0.2)',
+                        borderColor: hvacState === 'heat' ? 'rgba(255, 87, 34, 0.8)' : 'rgba(33, 150, 243, 0.8)'
+                    };
+                } else {
+                    // Continue current period
+                    currentPeriod.endIndex = index;
+                    currentPeriod.endTime = timeStr;
+                }
+            } else {
+                // End current period
+                if (currentPeriod) {
+                    periods.push(currentPeriod);
+                    currentPeriod = null;
+                }
+            }
+        });
+        
+        // Don't forget the last period
+        if (currentPeriod) {
+            periods.push(currentPeriod);
+        }
+        
+        return periods;
     }
 
     updateEnergyChart(data) {
