@@ -493,7 +493,7 @@ class ComfortAnalyzer:
                     'type': 'hvac_schedule',
                     'priority': 'medium',
                     'message': f"Optimal HVAC start time in {start_in_minutes:.0f} minutes",
-                    'action': f"Schedule {forecast_result['initial_conditions']['hvac_state']} to start at {hvac_timing['start_time'].strftime('%I:%M %p')}"
+                    'action': f"Schedule {forecast_result['initial_conditions']['hvac_state']} to start at {self._format_time_consistent(hvac_timing['start_time'])}"
                 })
                 
         # Efficiency recommendation
@@ -546,7 +546,7 @@ class ComfortAnalyzer:
         if analysis_result['hvac_start_time']:
             triggers.append({
                 'platform': 'time',
-                'at': analysis_result['hvac_start_time'].strftime('%I:%M:%S %p'),
+                'at': self._format_time_consistent(analysis_result['hvac_start_time'], include_seconds=True),
                 'action': {
                     'service': 'climate.set_hvac_mode',
                     'data': {
@@ -559,7 +559,7 @@ class ComfortAnalyzer:
         if analysis_result['hvac_stop_time']:
             triggers.append({
                 'platform': 'time',
-                'at': analysis_result['hvac_stop_time'].strftime('%I:%M:%S %p'),
+                'at': self._format_time_consistent(analysis_result['hvac_stop_time'], include_seconds=True),
                 'action': {
                     'service': 'climate.set_hvac_mode',
                     'data': {
@@ -583,3 +583,19 @@ class ComfortAnalyzer:
             })
             
         return triggers
+    
+    def _format_time_consistent(self, dt, include_seconds=False) -> str:
+        """Format time consistently across the system (h:mm AM/PM or h:mm:ss AM/PM)"""
+        import platform
+        
+        # Choose format string based on platform and seconds preference
+        if include_seconds:
+            if platform.system() == 'Windows':
+                return dt.strftime("%#I:%M:%S %p")
+            else:
+                return dt.strftime("%-I:%M:%S %p")
+        else:
+            if platform.system() == 'Windows':
+                return dt.strftime("%#I:%M %p")
+            else:
+                return dt.strftime("%-I:%M %p")

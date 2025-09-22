@@ -19,6 +19,23 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def format_time_consistent(dt, include_seconds=False) -> str:
+    """Format time consistently across the system (h:mm AM/PM or h:mm:ss AM/PM)"""
+    import platform
+    
+    # Choose format string based on platform and seconds preference
+    if include_seconds:
+        if platform.system() == 'Windows':
+            return dt.strftime("%#I:%M:%S %p")
+        else:
+            return dt.strftime("%-I:%M:%S %p")
+    else:
+        if platform.system() == 'Windows':
+            return dt.strftime("%#I:%M %p")
+        else:
+            return dt.strftime("%-I:%M %p")
+
+
 def convert_numpy_types(obj):
     """Convert numpy types and other problematic types to native Python types for JSON serialization"""
     import datetime
@@ -136,7 +153,7 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
                 runtime_hours = temp_diff / heating_rate
                 insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
                 off_time = now + timedelta(hours=runtime_hours)
-                insights['action_off_time'] = off_time.strftime("%I:%M %p")
+                insights['action_off_time'] = format_time_consistent(off_time)
                 
                 # Predict next heating cycle (when temp drops to comfort_min)
                 temp_after_off = target_temp
@@ -144,7 +161,7 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
                     temp_after_off -= drift_rate
                     if temp_after_off <= comfort_min:
                         next_heat_time = off_time + timedelta(hours=hour-0.5)  # Start early
-                        insights['next_action_time'] = next_heat_time.strftime("%I:%M %p")
+                        insights['next_action_time'] = format_time_consistent(next_heat_time)
                         break
             else:
                 insights['action_off_time'] = "Now"
@@ -159,7 +176,7 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
                 runtime_hours = temp_diff / cooling_rate
                 insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
                 off_time = now + timedelta(hours=runtime_hours)
-                insights['action_off_time'] = off_time.strftime("%I:%M %p")
+                insights['action_off_time'] = format_time_consistent(off_time)
                 
                 # Predict next cooling cycle (when temp rises to comfort_max)
                 temp_after_off = target_temp
@@ -167,7 +184,7 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
                     temp_after_off += drift_rate
                     if temp_after_off >= comfort_max:
                         next_cool_time = off_time + timedelta(hours=hour-0.5)  # Start early
-                        insights['next_action_time'] = next_cool_time.strftime("%I:%M %p")
+                        insights['next_action_time'] = format_time_consistent(next_cool_time)
                         break
             else:
                 insights['action_off_time'] = "Now"
@@ -192,7 +209,7 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
                         temp_prediction -= drift_rate
                         if temp_prediction <= comfort_min:
                             heat_start_time = now + timedelta(hours=max(0, hour-1))
-                            insights['next_action_time'] = heat_start_time.strftime("%I:%M %p")
+                            insights['next_action_time'] = format_time_consistent(heat_start_time)
                             break
                             
                 # Predict when cooling will be needed
@@ -202,7 +219,7 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
                         temp_prediction += drift_rate
                         if temp_prediction >= comfort_max:
                             cool_start_time = now + timedelta(hours=max(0, hour-1))
-                            insights['next_action_time'] = cool_start_time.strftime("%I:%M %p")
+                            insights['next_action_time'] = format_time_consistent(cool_start_time)
                             break
         
         # Format times based on timezone if available
@@ -329,7 +346,12 @@ def create_app(homeforecast_instance):
                         app.homeforecast.thermal_model.last_update
                     )
                 else:
-                    last_update_str = app.homeforecast.thermal_model.last_update.strftime("%m/%d %I:%M %p")
+                    # Use consistent date formatting: m/d h:mm AM/PM
+                    import platform
+                    if platform.system() == 'Windows':
+                        last_update_str = app.homeforecast.thermal_model.last_update.strftime("%#m/%#d %#I:%M %p")
+                    else:
+                        last_update_str = app.homeforecast.thermal_model.last_update.strftime("%-m/%-d %-I:%M %p")
 
             # Get ML model performance data
             ml_performance = {}
@@ -380,7 +402,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '1.8.0',
+                'addon_version': '1.8.1',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -392,13 +414,13 @@ def create_app(homeforecast_instance):
                 if hasattr(app.homeforecast, 'ha_client'):
                     current_local_time = app.homeforecast.ha_client.format_time_for_display(datetime.now())
                 else:
-                    current_local_time = datetime.now().strftime("%I:%M %p")
+                    current_local_time = format_time_consistent(datetime.now())
             except Exception as e:
                 logger.warning(f"Could not format current time: {e}")
 
             response_data = {
                 'status': 'running',
-                'version': '1.8.0',
+                'version': '1.8.1',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
@@ -459,10 +481,11 @@ def create_app(homeforecast_instance):
                             'indoor_temps': forecast_data['indoor_forecast'],
                             'outdoor_temps': forecast_data['outdoor_forecast'],
                             'idle_trajectory': forecast_data.get('idle_trajectory', []),
-                            'controlled_trajectory': forecast_data.get('controlled_trajectory', [])
+                            'controlled_trajectory': forecast_data.get('controlled_trajectory', []),
+                            'historical_weather': forecast_data.get('historical_weather', [])
                         }
                         forecast['chart_data'] = chart_data
-                        logger.info(f"Added chart data with {len(chart_data['timestamps'])} points")
+                        logger.info(f"Added chart data with {len(chart_data['timestamps'])} points and {len(chart_data['historical_weather'])} historical points")
                 
                 # Convert all data to JSON-serializable types
                 forecast = convert_numpy_types(forecast)

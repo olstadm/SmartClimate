@@ -145,14 +145,43 @@ class HomeAssistantClient:
         return local_time.strftime(format_str)
 
     def format_time_for_display(self, utc_datetime=None) -> str:
-        """Format datetime for dashboard display"""
+        """Format datetime for dashboard display (h:mm AM/PM format)"""
+        import platform
         local_time = self.get_local_time(utc_datetime)
-        return local_time.strftime("%I:%M %p")
+        
+        # Format as h:mm AM/PM (handle leading zero differences between platforms)
+        if platform.system() == 'Windows':
+            return local_time.strftime("%#I:%M %p")
+        else:
+            return local_time.strftime("%-I:%M %p")
 
     def format_datetime_for_display(self, utc_datetime=None) -> str:
-        """Format full datetime for dashboard display"""
+        """Format full datetime for dashboard display (m/d h:mm AM/PM format)"""
+        import platform
         local_time = self.get_local_time(utc_datetime)
-        return local_time.strftime("%m/%d %I:%M %p")
+        
+        # Format as m/d h:mm AM/PM (handle leading zero differences between platforms)
+        if platform.system() == 'Windows':
+            return local_time.strftime("%#m/%#d %#I:%M %p")
+        else:
+            return local_time.strftime("%-m/%-d %-I:%M %p")
+    
+    @staticmethod
+    def format_time_consistent(dt, include_seconds=False) -> str:
+        """Format time consistently across the system (h:mm AM/PM or h:mm:ss AM/PM)"""
+        import platform
+        
+        # Choose format string based on platform and seconds preference
+        if include_seconds:
+            if platform.system() == 'Windows':
+                return dt.strftime("%#I:%M:%S %p")
+            else:
+                return dt.strftime("%-I:%M:%S %p")
+        else:
+            if platform.system() == 'Windows':
+                return dt.strftime("%#I:%M %p")
+            else:
+                return dt.strftime("%-I:%M %p")
             
     async def get_sensor_data(self) -> Dict:
         """Collect current sensor data with robust error handling"""
@@ -574,16 +603,16 @@ class HomeAssistantClient:
         # Try to get forecast with retry logic  
         forecast_success = await self._get_accuweather_forecast(api_key, location_key, forecast_data)
         
-        # Try to get historical data for trend analysis
-        logger.info("🕰️ Fetching historical weather data for trend analysis...")
-        historical_data = await self.get_historical_weather_data(hours=6)
+        # Get historical data from internal cache for trend analysis  
+        logger.info("🕰️ Fetching historical data from internal cache for trend analysis...")
+        historical_data = await self.get_cached_historical_data(hours=6)
         if historical_data and 'historical_weather' in historical_data:
             forecast_data['historical_weather'] = historical_data['historical_weather']
             if historical_data['data_quality']['issues']:
                 forecast_data['data_quality']['issues'].extend(historical_data['data_quality']['issues'])
-            logger.info(f"✅ Historical data integrated: {len(historical_data['historical_weather'])} data points")
+            logger.info(f"✅ Cached historical data integrated: {len(historical_data['historical_weather'])} data points")
         else:
-            logger.warning("⚠️ No historical data available - trend analysis will be limited")
+            logger.warning("⚠️ No cached historical data available - trend analysis will be limited")
             forecast_data['historical_weather'] = []
         
         # If both current and forecast failed, return fallback data
@@ -601,9 +630,10 @@ class HomeAssistantClient:
         if not forecast_success:
             forecast_data['data_quality']['issues'].append('Forecast data unavailable')
             
-        # Cache successful data for future fallbacks
+        # Cache successful data for future fallbacks and historical reference
         if current_success or forecast_success:
             self._cache_weather_data(forecast_data)
+            self.cache_current_weather_data(forecast_data)
             
         return forecast_data
 
@@ -743,158 +773,172 @@ class HomeAssistantClient:
                 
         return False
 
-    async def get_historical_weather_data(self, hours: int = 6) -> Dict:
-        """Get historical weather data from AccuWeather for the past N hours"""
-        logger.info(f"=== Getting Historical Weather Data (past {hours} hours) ===")
+    async def get_cached_historical_data(self, hours: int = 6) -> Dict:
+        """Get historical weather data from internal cache and database"""
+        logger.info(f"=== Getting Cached Historical Data (past {hours} hours) ===")
         
-        api_key = self.config.get('accuweather_api_key')
-        location_key = self.config.get('accuweather_location_key')
-        
-        if not api_key or not location_key:
-            logger.error("❌ AccuWeather API credentials not configured for historical data")
-            return self._get_fallback_historical_data(hours, "Missing API credentials")
-        
-        historical_data = {
-            'historical_weather': [],
-            'data_quality': {'source': 'accuweather_historical', 'issues': []}
-        }
-        
-        success = await self._get_accuweather_historical(api_key, location_key, historical_data, hours)
-        
-        if not success:
-            logger.error("❌ AccuWeather historical API failure - using fallback data")
-            return self._get_fallback_historical_data(hours, "API failure")
-        
-        logger.info(f"✅ Historical weather data retrieved: {len(historical_data['historical_weather'])} hours")
-        return historical_data
+        try:
+            # Try to get data from database first (our recorded measurements and forecasts)
+            if hasattr(self, 'data_store') and self.data_store:
+                historical_data = await self._get_database_historical_data(hours)
+                if historical_data and historical_data['historical_weather']:
+                    logger.info(f"✅ Retrieved {len(historical_data['historical_weather'])} points from database")
+                    return historical_data
+            
+            # Fallback to synthetic data based on current conditions
+            return self._generate_synthetic_historical_data(hours)
+            
+        except Exception as e:
+            logger.error(f"Error getting cached historical data: {e}")
+            return self._generate_synthetic_historical_data(hours)
 
-    async def _get_accuweather_historical(self, api_key: str, location_key: str, historical_data: Dict, hours: int, retries: int = 2) -> bool:
-        """Get historical conditions from AccuWeather with retry logic"""
-        historical_url = f"http://dataservice.accuweather.com/currentconditions/v1/{location_key}/historical"
-        
-        for attempt in range(retries + 1):
-            try:
-                params = {
-                    'apikey': api_key, 
-                    'details': 'true'
+    async def _get_database_historical_data(self, hours: int) -> Dict:
+        """Get historical data from database measurements and cached forecasts"""
+        try:
+            from ..utils.data_store import DataStore
+            
+            # Get recent measurements from database
+            recent_measurements = await self.data_store.get_recent_measurements(hours)
+            
+            historical_weather = []
+            
+            for measurement in recent_measurements:
+                if 'outdoor_temp' in measurement and 'timestamp' in measurement:
+                    historical_weather.append({
+                        'timestamp': measurement['timestamp'],
+                        'temperature': measurement['outdoor_temp'],
+                        'humidity': measurement.get('outdoor_humidity', 50.0),
+                        'solar_irradiance': measurement.get('solar_irradiance', 0.0),
+                        'source': 'database_measurement'
+                    })
+            
+            # If we don't have enough database records, supplement with weather cache
+            if len(historical_weather) < hours:
+                logger.info(f"Only {len(historical_weather)} database records, supplementing with cached weather data")
+                cached_weather = await self._get_cached_weather_predictions(hours - len(historical_weather))
+                historical_weather.extend(cached_weather)
+            
+            # Sort by timestamp
+            historical_weather.sort(key=lambda x: x['timestamp'])
+            
+            return {
+                'historical_weather': historical_weather,
+                'data_quality': {
+                    'source': 'database_cache',
+                    'issues': [] if len(historical_weather) >= hours // 2 else ['Limited historical data available']
                 }
-                timeout = aiohttp.ClientTimeout(total=20)
-                
-                async with self.session.get(historical_url, params=params, timeout=timeout) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        if data and len(data) > 0:
-                            valid_hours = 0
-                            now = datetime.now()
-                            cutoff_time = now - timedelta(hours=hours)
-                            
-                            for hour_data in data:
-                                try:
-                                    # Parse the timestamp
-                                    timestamp = datetime.fromisoformat(hour_data['LocalObservationDateTime'].replace('Z', '+00:00'))
-                                    
-                                    # Only include data within our requested timeframe
-                                    if timestamp < cutoff_time:
-                                        continue
-                                    
-                                    temp = hour_data['Temperature']['Imperial']['Value']
-                                    humidity = hour_data['RelativeHumidity']
-                                    
-                                    # Validate historical data
-                                    if not (-50 <= temp <= 150):
-                                        logger.warning(f"Skipping invalid historical temperature: {temp}°F")
-                                        continue
-                                        
-                                    if not (0 <= humidity <= 100):
-                                        humidity = max(0, min(100, humidity))  # Clamp humidity
-                                        
-                                    historical_data['historical_weather'].append({
-                                        'timestamp': timestamp,
-                                        'temperature': temp,
-                                        'humidity': humidity,
-                                        'solar_irradiance': self._calculate_solar_irradiance(hour_data),
-                                        'precipitation': hour_data.get('Precipitation', {}).get('Imperial', {}).get('Value', 0)
-                                    })
-                                    valid_hours += 1
-                                    
-                                except Exception as e:
-                                    logger.warning(f"Skipping invalid historical hour: {e}")
-                                    continue
-                                    
-                            if valid_hours > 0:
-                                # Sort by timestamp (oldest first)
-                                historical_data['historical_weather'].sort(key=lambda x: x['timestamp'])
-                                logger.info(f"✅ AccuWeather historical: {valid_hours} valid hours retrieved")
-                                return True
-                            else:
-                                logger.warning("No valid historical hours found")
-                                
-                    elif resp.status == 401:
-                        logger.error("❌ AccuWeather API authentication failed - check API key")
-                        return False
-                    elif resp.status == 403:
-                        logger.error("❌ AccuWeather API quota exceeded or forbidden")
-                        return False
-                    elif resp.status == 503:
-                        logger.warning(f"AccuWeather historical service temporarily unavailable (503) - attempt {attempt + 1}")
-                        if attempt < retries:
-                            await asyncio.sleep(5 + (2 ** attempt))
-                            continue
-                    else:
-                        logger.warning(f"AccuWeather historical failed: HTTP {resp.status} on attempt {attempt + 1}")
-                        
-            except asyncio.TimeoutError:
-                logger.warning(f"Timeout getting AccuWeather historical data on attempt {attempt + 1}")
-            except Exception as e:
-                logger.warning(f"Error getting AccuWeather historical data on attempt {attempt + 1}: {e}")
-                
-            # Wait before retry
-            if attempt < retries:
-                await asyncio.sleep(2 ** attempt)
-                
-        return False
+            }
+            
+        except Exception as e:
+            logger.warning(f"Database historical data query failed: {e}")
+            return {'historical_weather': [], 'data_quality': {'source': 'error', 'issues': [str(e)]}}
 
-    def _get_fallback_historical_data(self, hours: int, reason: str) -> Dict:
-        """Generate fallback historical data when AccuWeather historical is unavailable"""
-        logger.info(f"🔄 Generating fallback historical data - Reason: {reason}")
+    async def _get_cached_weather_predictions(self, hours: int) -> List[Dict]:
+        """Get cached weather predictions to supplement historical data"""
+        cached_predictions = []
         
-        # Generate synthetic historical data based on current conditions and trends
+        try:
+            # Get cached forecast data that's now "historical"
+            cached_forecasts = await self.data_store.get_recent_forecasts(hours=hours + 2)  # Get a bit more to find overlaps
+            
+            now = datetime.now()
+            cutoff_time = now - timedelta(hours=hours)
+            
+            for forecast in cached_forecasts:
+                if 'outdoor_forecast' in forecast.get('data', {}):
+                    forecast_data = forecast['data']
+                    timestamps = forecast_data.get('timestamps', [])
+                    outdoor_temps = forecast_data.get('outdoor_forecast', [])
+                    
+                    for i, timestamp in enumerate(timestamps):
+                        if isinstance(timestamp, str):
+                            timestamp = datetime.fromisoformat(timestamp)
+                        
+                        # Only include data within our historical window that's now past
+                        if cutoff_time <= timestamp <= now and i < len(outdoor_temps):
+                            cached_predictions.append({
+                                'timestamp': timestamp,
+                                'temperature': outdoor_temps[i],
+                                'humidity': 50.0,  # Default
+                                'solar_irradiance': 0.0,
+                                'source': 'cached_prediction'
+                            })
+                            
+        except Exception as e:
+            logger.warning(f"Error getting cached weather predictions: {e}")
+        
+        return cached_predictions
+
+    def _generate_synthetic_historical_data(self, hours: int) -> Dict:
+        """Generate synthetic historical data when no cache is available"""
+        logger.info(f"🔄 Generating synthetic historical data for past {hours} hours")
+        
+        # Use current conditions as baseline
         now = datetime.now()
         current_temp = 70.0  # Default temperature
         
-        # Try to get current outdoor temperature from sensors if available
+        # Try to get current outdoor temperature from recent data
         try:
-            if hasattr(self, '_last_outdoor_temp'):
-                current_temp = getattr(self, '_last_outdoor_temp', 70.0)
+            if hasattr(self, 'current_outdoor_temp') and self.current_outdoor_temp:
+                current_temp = self.current_outdoor_temp
         except:
             pass
         
         historical_data = {
             'historical_weather': [],
             'data_quality': {
-                'source': 'estimated_historical',
-                'issues': [f'AccuWeather historical unavailable: {reason}', 'Using synthetic historical data']
+                'source': 'synthetic',
+                'issues': ['No cached data available', 'Using synthetic historical estimates']
             }
         }
         
-        # Generate hourly data going backwards
+        # Generate hourly data going backwards with realistic variation
         for i in range(hours):
             timestamp = now - timedelta(hours=hours - i)
             
-            # Add some realistic variation to the temperature
-            temp_variation = math.sin(i * 0.5) * 3  # ±3°F variation
-            estimated_temp = current_temp + temp_variation
+            # Add realistic temperature variation based on time of day and randomness
+            hour_of_day = timestamp.hour
+            diurnal_variation = 5 * math.sin((hour_of_day - 6) * math.pi / 12)  # Peak at 2 PM
+            random_variation = (i % 3 - 1) * 2  # ±2°F random variation
+            estimated_temp = current_temp + diurnal_variation + random_variation
             
             historical_data['historical_weather'].append({
                 'timestamp': timestamp,
                 'temperature': estimated_temp,
-                'humidity': 50.0 + (i % 20),  # Vary humidity 50-70%
+                'humidity': 50.0 + (i % 30),  # Vary humidity 50-80%
                 'solar_irradiance': self._estimate_solar_irradiance_simple(timestamp),
-                'precipitation': 0.0
+                'source': 'synthetic'
             })
         
         logger.info(f"✅ Generated {hours} hours of synthetic historical data")
         return historical_data
+
+    def cache_current_weather_data(self, weather_data: Dict):
+        """Cache current weather data for future historical reference"""
+        try:
+            # This method can be called to cache current AccuWeather data
+            # for use as "historical" data in future requests
+            if not hasattr(self, '_weather_cache'):
+                self._weather_cache = []
+            
+            # Add current conditions to cache with timestamp
+            cache_entry = {
+                'timestamp': datetime.now(),
+                'outdoor_temp': weather_data.get('current_outdoor', {}).get('temperature'),
+                'outdoor_humidity': weather_data.get('current_outdoor', {}).get('humidity'),
+                'solar_irradiance': weather_data.get('current_outdoor', {}).get('solar_irradiance', 0),
+                'source': 'accuweather_cached'
+            }
+            
+            # Keep only last 24 hours of cache
+            cutoff_time = datetime.now() - timedelta(hours=24)
+            self._weather_cache = [entry for entry in self._weather_cache if entry['timestamp'] > cutoff_time]
+            self._weather_cache.append(cache_entry)
+            
+            logger.debug(f"Weather data cached - cache size: {len(self._weather_cache)}")
+            
+        except Exception as e:
+            logger.warning(f"Error caching weather data: {e}")
 
     def _get_fallback_weather_data(self, reason: str) -> Dict:
         """Generate fallback weather data when AccuWeather is unavailable"""

@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import os
+import platform
 import sys
 import signal
 from datetime import datetime, timedelta
@@ -27,15 +28,41 @@ from models.forecast_engine import ForecastEngine
 from models.comfort_analyzer import ComfortAnalyzer
 from api.web_server import create_app
 
-# Setup logging
+# Setup logging with local timezone and 12-hour format
+class LocalTimeFormatter(logging.Formatter):
+    """Custom formatter that uses local timezone and 12-hour AM/PM format"""
+    
+    def formatTime(self, record, datefmt=None):
+        # Convert to local time and format as h:mm AM/PM
+        # Get local time
+        local_time = datetime.fromtimestamp(record.created)
+        
+        # Format as h:mm AM/PM (handle leading zero differences between platforms)
+        if platform.system() == 'Windows':
+            # Windows uses %#I to remove leading zero
+            formatted_time = local_time.strftime('%#I:%M %p')
+        else:
+            # Unix/Linux uses %-I to remove leading zero
+            formatted_time = local_time.strftime('%-I:%M %p')
+        
+        return formatted_time
+
+# Create formatter
+formatter = LocalTimeFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# Setup handlers with custom formatter
+file_handler = logging.FileHandler('/var/log/homeforecast/homeforecast.log')
+file_handler.setFormatter(formatter)
+
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(formatter)
+
+# Configure root logger
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('/var/log/homeforecast/homeforecast.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
+    handlers=[file_handler, console_handler]
 )
+
 logger = logging.getLogger(__name__)
 
 
@@ -236,6 +263,15 @@ class HomeForecast:
             logger.info("🔮 Step 5: Generating forecast...")
             forecast_result = None
             try:
+                # Get cached historical weather data for enhanced trend analysis
+                try:
+                    historical_weather = await self.ha_client.get_cached_historical_data(hours=6)
+                    weather_forecast['historical_weather'] = historical_weather
+                    logger.info(f"✅ Added {len(historical_weather)} cached historical weather points to forecast")
+                except Exception as hist_e:
+                    logger.warning(f"⚠️ Could not get cached historical weather data: {hist_e}")
+                    weather_forecast['historical_weather'] = []
+                
                 forecast_result = await self.forecast_engine.generate_forecast(
                     sensor_data,
                     weather_forecast,

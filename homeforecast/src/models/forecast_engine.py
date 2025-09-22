@@ -567,11 +567,26 @@ class ForecastEngine:
         # Comfort violation warnings
         if analysis['comfort_violations']['idle']:
             first_violation = analysis['comfort_violations']['idle'][0]
-            time_until = (first_violation['timestamp'] - datetime.now()).total_seconds() / 60
-            recommendations.append(
-                f"Without HVAC, temperature will be {first_violation['violation'].replace('_', ' ')} "
-                f"in {time_until:.0f} minutes"
-            )
+            try:
+                # Handle timezone-aware vs timezone-naive datetime comparison
+                violation_time = first_violation['timestamp']
+                if hasattr(violation_time, 'tzinfo') and violation_time.tzinfo is not None:
+                    # Use timezone-aware current time
+                    current_time = datetime.now(violation_time.tzinfo)
+                else:
+                    # Use naive current time
+                    current_time = datetime.now()
+                
+                time_until = (violation_time - current_time).total_seconds() / 60
+                recommendations.append(
+                    f"Without HVAC, temperature will be {first_violation['violation'].replace('_', ' ')} "
+                    f"in {time_until:.0f} minutes"
+                )
+            except TypeError as e:
+                logger.warning(f"Could not calculate time until comfort violation: {e}")
+                recommendations.append(
+                    f"Without HVAC, temperature will be {first_violation['violation'].replace('_', ' ')}"
+                )
             
         return recommendations
 
@@ -604,7 +619,24 @@ class ForecastEngine:
             accuweather_humidity = weather_forecast.get('current_outdoor', {}).get('humidity')
             current_outdoor_humidity = accuweather_humidity if accuweather_humidity is not None else 50.0
             
-        current_time = current_data.get('timestamp', datetime.now())
+        # Use timezone-aware current time if available, otherwise fallback to naive
+        if 'timestamp' in current_data:
+            current_time = current_data['timestamp']
+        else:
+            # Create timezone-aware current time matching the timezone context
+            try:
+                if timezone_name != 'UTC' and HAS_PYTZ:
+                    tz = pytz.timezone(timezone_name)
+                    current_time = datetime.now(tz)
+                elif timezone_name != 'UTC' and HAS_ZONEINFO:
+                    import zoneinfo
+                    tz = zoneinfo.ZoneInfo(timezone_name)
+                    current_time = datetime.now(tz)
+                else:
+                    current_time = datetime.now()
+            except Exception as e:
+                logger.warning(f"Could not set timezone {timezone_name}, using naive time: {e}")
+                current_time = datetime.now()
         series.append({
             'timestamp': current_time,
             'outdoor_temp': current_outdoor_temp,
@@ -640,7 +672,17 @@ class ForecastEngine:
         if not outdoor_series:
             return None
             
-        current_time = datetime.now()
+        # Use timezone-aware current time to match the timestamps in the series
+        if outdoor_series and 'timestamp' in outdoor_series[0]:
+            sample_timestamp = outdoor_series[0]['timestamp']
+            if hasattr(sample_timestamp, 'tzinfo') and sample_timestamp.tzinfo is not None:
+                # Use timezone-aware current time matching the series timezone
+                current_time = datetime.now(sample_timestamp.tzinfo)
+            else:
+                # Use naive current time
+                current_time = datetime.now()
+        else:
+            current_time = datetime.now()
         
         # Find the point closest to current time
         min_diff = float('inf')
@@ -651,10 +693,24 @@ class ForecastEngine:
                 return i
             
             # Fallback: find closest time to now
-            time_diff = abs((point['timestamp'] - current_time).total_seconds())
-            if time_diff < min_diff:
-                min_diff = time_diff
-                current_index = i
+            try:
+                time_diff = abs((point['timestamp'] - current_time).total_seconds())
+                if time_diff < min_diff:
+                    min_diff = time_diff
+                    current_index = i
+            except TypeError as e:
+                # Handle timezone mismatch by converting both to UTC for comparison
+                logger.warning(f"Timezone comparison error at index {i}: {e}")
+                try:
+                    point_utc = point['timestamp'].astimezone(pytz.UTC) if hasattr(point['timestamp'], 'astimezone') else point['timestamp']
+                    current_utc = current_time.astimezone(pytz.UTC) if hasattr(current_time, 'astimezone') else current_time
+                    time_diff = abs((point_utc - current_utc).total_seconds())
+                    if time_diff < min_diff:
+                        min_diff = time_diff
+                        current_index = i
+                except Exception as nested_e:
+                    logger.warning(f"Could not compare timestamp at index {i}: {nested_e}")
+                    continue
         
         return current_index
 

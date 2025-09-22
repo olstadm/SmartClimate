@@ -448,62 +448,144 @@ class HomeForecastDashboard {
         const hvacPeriods = this.extractHvacPeriods(data);
         console.log('Extracted HVAC periods:', hvacPeriods);
 
-        const chartData = {
-            labels: data.timestamps.map(ts => {
-                const date = new Date(ts);
-                // Convert to local time for display - the browser will handle timezone conversion
-                // but we ensure the format is consistent
+        // Prepare chart data with historical context
+        let chartData;
+        const datasets = [];
+
+        // If we have historical weather data, create a separate dataset for it
+        if (data.historical_weather && data.historical_weather.length > 0) {
+            console.log(`Adding ${data.historical_weather.length} historical weather points to chart`);
+            
+            // Create historical labels and data
+            const historicalLabels = data.historical_weather.map(hw => {
+                const date = new Date(hw.timestamp);
                 return date.toLocaleTimeString([], {
                     hour: '2-digit', 
                     minute:'2-digit',
-                    hour12: true  // Use 12-hour AM/PM format
+                    hour12: true
                 });
-            }),
-            datasets: [
-                {
-                    label: 'Projected Indoor (Smart HVAC)',
-                    data: data.controlled_trajectory.map(p => p.indoor_temp),
-                    borderColor: '#2196F3',
-                    backgroundColor: 'rgba(33, 150, 243, 0.1)',
-                    tension: 0.4,
-                    pointRadius: 3,
-                    borderWidth: 3,
-                    fill: false
-                },
-                {
-                    label: 'Forecasted Outdoor',
-                    data: data.outdoor_forecast,
-                    borderColor: '#4CAF50',
-                    backgroundColor: 'rgba(76, 175, 80, 0.1)',
-                    tension: 0.4,
-                    pointRadius: 2,
-                    borderWidth: 2,
-                    fill: false
-                },
-                {
-                    label: 'Indoor (No HVAC Control)',
-                    data: data.idle_trajectory.map(p => p.indoor_temp),
-                    borderColor: '#F44336',
-                    backgroundColor: 'rgba(244, 67, 54, 0.1)',
-                    borderDash: [8, 4],
-                    tension: 0.4,
-                    pointRadius: 0,
-                    borderWidth: 2,
-                    fill: false
-                },
-                {
-                    label: 'Indoor (Current Trajectory)',
-                    data: data.current_trajectory ? data.current_trajectory.map(p => p.indoor_temp) : [],
-                    borderColor: '#FF9800',
-                    backgroundColor: 'rgba(255, 152, 0, 0.1)',
-                    borderDash: [4, 2],
-                    tension: 0.4,
-                    pointRadius: 0,
-                    borderWidth: 1,
-                    fill: false
-                }
-            ]
-        };
+            });
+
+            // Create combined labels (historical + forecast)
+            const allLabels = [...historicalLabels, ...data.timestamps.map(ts => {
+                const date = new Date(ts);
+                return date.toLocaleTimeString([], {
+                    hour: '2-digit', 
+                    minute:'2-digit',
+                    hour12: true
+                });
+            })];
+
+            // Historical outdoor temperature dataset
+            datasets.push({
+                label: 'Historical Outdoor (Cached)',
+                data: data.historical_weather.map(hw => hw.temperature),
+                borderColor: '#795548',
+                backgroundColor: 'rgba(121, 85, 72, 0.1)',
+                tension: 0.4,
+                pointRadius: 1,
+                borderWidth: 2,
+                borderDash: [2, 2],
+                fill: false
+            });
+
+            // Add null values for forecast period for historical data
+            const historicalData = [...data.historical_weather.map(hw => hw.temperature), 
+                                   ...new Array(data.timestamps.length).fill(null)];
+            datasets[0].data = historicalData;
+
+            // Forecast outdoor data with null values for historical period
+            const forecastData = [...new Array(data.historical_weather.length).fill(null),
+                                 ...data.outdoor_forecast];
+
+            datasets.push({
+                label: 'Forecasted Outdoor',
+                data: forecastData,
+                borderColor: '#4CAF50',
+                backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                tension: 0.4,
+                pointRadius: 2,
+                borderWidth: 2,
+                fill: false
+            });
+
+            // Indoor forecasts also need null padding for historical period
+            datasets.push({
+                label: 'Projected Indoor (Smart HVAC)',
+                data: [...new Array(data.historical_weather.length).fill(null),
+                      ...data.controlled_trajectory.map(p => p.indoor_temp)],
+                borderColor: '#2196F3',
+                backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                tension: 0.4,
+                pointRadius: 3,
+                borderWidth: 3,
+                fill: false
+            });
+
+            chartData = {
+                labels: allLabels,
+                datasets: datasets
+            };
+
+        }
+
+        // If no historical data, use original chart structure
+        if (!data.historical_weather || data.historical_weather.length === 0) {
+            chartData = {
+                labels: data.timestamps.map(ts => {
+                    const date = new Date(ts);
+                    return date.toLocaleTimeString([], {
+                        hour: '2-digit', 
+                        minute:'2-digit',
+                        hour12: true
+                    });
+                }),
+                datasets: [
+                    {
+                        label: 'Projected Indoor (Smart HVAC)',
+                        data: data.controlled_trajectory.map(p => p.indoor_temp),
+                        borderColor: '#2196F3',
+                        backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                        tension: 0.4,
+                        pointRadius: 3,
+                        borderWidth: 3,
+                        fill: false
+                    },
+                    {
+                        label: 'Forecasted Outdoor',
+                        data: data.outdoor_forecast,
+                        borderColor: '#4CAF50',
+                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                        tension: 0.4,
+                        pointRadius: 2,
+                        borderWidth: 2,
+                        fill: false
+                    },
+                    {
+                        label: 'Indoor (No HVAC Control)',
+                        data: data.idle_trajectory.map(p => p.indoor_temp),
+                        borderColor: '#F44336',
+                        backgroundColor: 'rgba(244, 67, 54, 0.1)',
+                        borderDash: [8, 4],
+                        tension: 0.4,
+                        pointRadius: 0,
+                        borderWidth: 2,
+                        fill: false
+                    },
+                    {
+                        label: 'Indoor (Current Trajectory)',
+                        data: data.current_trajectory ? data.current_trajectory.map(p => p.indoor_temp) : [],
+                        borderColor: '#FF9800',
+                        backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                        borderDash: [4, 2],
+                        tension: 0.4,
+                        pointRadius: 0,
+                        borderWidth: 1,
+                        fill: false
+                    }
+                ]
+            };
+        }
 
         const options = {
             responsive: true,
