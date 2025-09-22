@@ -32,12 +32,28 @@ def convert_numpy_types(obj):
         return obj.item()
     elif HAS_NUMPY and isinstance(obj, np.ndarray):
         return obj.tolist()
-    elif HAS_NUMPY and isinstance(obj, (np.bool_, np.bool8)):
-        return bool(obj)
-    elif HAS_NUMPY and isinstance(obj, (np.int_, np.intc, np.intp, np.int8, np.int16, np.int32, np.int64)):
-        return int(obj)
-    elif HAS_NUMPY and isinstance(obj, (np.float_, np.float16, np.float32, np.float64)):
-        return float(obj)
+    
+    # Handle numpy boolean types (version-safe)
+    if HAS_NUMPY:
+        try:
+            if isinstance(obj, np.bool_):
+                return bool(obj)
+        except (AttributeError, TypeError):
+            pass
+        
+        # Handle numpy integer types
+        try:
+            if isinstance(obj, (np.int_, np.intc, np.intp, np.int8, np.int16, np.int32, np.int64)):
+                return int(obj)
+        except (AttributeError, TypeError):
+            pass
+        
+        # Handle numpy float types
+        try:
+            if isinstance(obj, (np.float_, np.float16, np.float32, np.float64)):
+                return float(obj)
+        except (AttributeError, TypeError):
+            pass
     
     # Handle Python boolean explicitly
     elif isinstance(obj, (bool, type(True), type(False))):
@@ -364,7 +380,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '1.7.0',
+                'addon_version': '1.7.1',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -382,7 +398,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '1.7.0',
+                'version': '1.7.1',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
