@@ -1,6 +1,6 @@
 name: "HomeForecast"
-version: "1.0.0"
-slug: "homeforecast"
+version: "1.0.3"
+slug: "homeforecast-local"
 description: "Smart thermal forecasting for your home - predicts indoor climate and HVAC needs"
 url: "https://github.com/olstadm/SmartClimate"
 arch:
@@ -61,4 +61,3 @@ panel_icon: mdi:home-thermometer-outline
 panel_title: HomeForecast
 startup: application
 boot: auto
-image: ghcr.io/{arch}-homeforecast
