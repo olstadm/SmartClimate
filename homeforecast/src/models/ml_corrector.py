@@ -48,16 +48,21 @@ class MLCorrector:
         
     async def initialize(self):
         """Initialize the ML correction model"""
-        logger.info("Initializing ML correction model...")
+        logger.info("🤖 Initializing ML correction model...")
+        logger.info(f"🔧 Model type: {self.model_type}")
+        logger.info(f"📊 Feature count: {len(self.feature_columns)}")
         
         # Load saved model if available
         await self.load_model()
         
         # If no saved model, try to train one
         if not self.is_trained:
+            logger.info("🎯 No trained model found, attempting initial training...")
             await self.retrain()
+        else:
+            logger.info(f"✅ Loaded existing trained model with {len(self.performance_history)} training sessions")
             
-        logger.info("ML correction model initialized")
+        logger.info(f"🎉 ML correction model initialized - Status: {'Trained' if self.is_trained else 'Not Trained'}")
         
     def _create_model(self):
         """Create the ML model based on configuration"""
@@ -83,21 +88,25 @@ class MLCorrector:
     async def retrain(self):
         """Retrain the ML model on recent data"""
         try:
-            logger.info("Retraining ML correction model...")
+            logger.info("🤖 Retraining ML correction model...")
             
             # Get training data from the last N days
             days_back = self.config.get('ml_training_days', 30)
+            logger.info(f"📊 Fetching training data from last {days_back} days...")
             training_data = await self.data_store.get_training_data(days_back)
+            logger.info(f"📈 Retrieved {len(training_data)} raw data points")
             
             if len(training_data) < 100:
-                logger.warning(f"Insufficient training data: {len(training_data)} samples")
+                logger.warning(f"⚠️ Insufficient training data: {len(training_data)} samples (need at least 100)")
+                logger.warning("🕐 Need more runtime to collect sufficient data for ML training")
                 return
                 
             # Prepare features and targets
+            logger.info("🔧 Preparing training features and targets...")
             X, y = self._prepare_training_data(training_data)
             
             if X is None or len(X) < 100:
-                logger.warning("Could not prepare sufficient training data")
+                logger.warning("⚠️ Could not prepare sufficient training data after feature preparation")
                 return
                 
             # Split data

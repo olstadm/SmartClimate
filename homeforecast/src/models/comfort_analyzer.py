@@ -223,7 +223,18 @@ class ComfortAnalyzer:
             (minutes until limit, timestamp when limit reached)
         """
         try:
+            # Use timezone-aware current time if trajectory has timezone-aware timestamps
             current_time = datetime.now()
+            if trajectory and trajectory[0].get('timestamp'):
+                sample_timestamp = self._parse_timestamp(trajectory[0]['timestamp'])
+                if sample_timestamp and sample_timestamp.tzinfo is not None:
+                    # Trajectory has timezone-aware timestamps, make current_time timezone-aware
+                    try:
+                        current_time = current_time.replace(tzinfo=sample_timestamp.tzinfo)
+                    except Exception as tz_e:
+                        logger.warning(f"Could not set timezone on current_time: {tz_e}")
+                        # Convert sample to naive instead
+                        current_time = datetime.now()
             
             for i, point in enumerate(trajectory):
                 # Safely get temperature with fallback

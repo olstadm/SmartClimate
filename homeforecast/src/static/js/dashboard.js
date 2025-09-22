@@ -363,7 +363,7 @@ class HomeForecastDashboard {
         const lastUpdateEl = document.getElementById('lastModelUpdate');
         if (lastUpdateEl && status.ml_performance && status.ml_performance.last_update) {
             const updateDate = new Date(status.ml_performance.last_update);
-            lastUpdateEl.textContent = updateDate.toLocaleDateString() + ' ' + updateDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            lastUpdateEl.textContent = updateDate.toLocaleDateString() + ' ' + updateDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: true});
         } else if (lastUpdateEl) {
             lastUpdateEl.textContent = 'Never';
         }
@@ -415,7 +415,7 @@ class HomeForecastDashboard {
                 return date.toLocaleTimeString([], {
                     hour: '2-digit', 
                     minute:'2-digit',
-                    hour12: false  // Use 24-hour format for consistency
+                    hour12: true  // Use 12-hour AM/PM format
                 });
             }),
             datasets: [
@@ -494,7 +494,7 @@ class HomeForecastDashboard {
                             const timestamp = data.timestamps[index];
                             const date = new Date(timestamp);
                             return date.toLocaleDateString() + ' ' + 
-                                   date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: false});
+                                   date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: true});
                         },
                         label: function(context) {
                             let label = context.dataset.label || '';
@@ -672,7 +672,7 @@ class HomeForecastDashboard {
         data.controlled_trajectory.forEach((point, index) => {
             const hvacState = point.hvac_state || 'off';
             const timestamp = data.timestamps[index];
-            const timeStr = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            const timeStr = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: true});
             
             if (hvacState !== 'off') {
                 if (!currentPeriod || currentPeriod.mode !== hvacState) {

@@ -103,18 +103,23 @@ class ThermalModel:
         
     async def initialize(self):
         """Initialize the thermal model"""
-        logger.info("Initializing thermal model...")
+        logger.info("🏠 Initializing thermal model...")
+        logger.info(f"📊 ML correction enabled: {self.ml_enabled}")
         
         # Load saved parameters if available
         await self.load_parameters()
         
         # Initialize ML corrector if enabled
         if self.ml_enabled:
+            logger.info("🤖 Initializing ML corrector...")
             from .ml_corrector import MLCorrector
             self.ml_corrector = MLCorrector(self.config, self.data_store)
             await self.ml_corrector.initialize()
+            logger.info("✅ ML corrector initialized")
+        else:
+            logger.info("⚠️ ML correction is disabled in configuration")
             
-        logger.info("Thermal model initialized")
+        logger.info("✅ Thermal model initialized")
         
     async def update(self, sensor_data: Dict) -> Dict:
         """

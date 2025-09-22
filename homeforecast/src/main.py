@@ -114,6 +114,16 @@ class HomeForecast:
         
         # ML model retraining (if enabled)
         if self.config.get('enable_ml_correction', False):
+            # More frequent initial training attempts (every 2 hours for first few days)
+            self.scheduler.add_job(
+                self.check_ml_training_readiness,
+                'interval',
+                hours=2,
+                id='ml_training_check',
+                replace_existing=True
+            )
+            
+            # Regular retraining (monthly)
             retrain_days = self.config.get('ml_retrain_days', 30)
             self.scheduler.add_job(
                 self.retrain_ml_model,
@@ -269,15 +279,44 @@ class HomeForecast:
         except Exception as e:
             logger.error(f"Error publishing results: {e}", exc_info=True)
             
+    async def check_ml_training_readiness(self):
+        """Check if ML model is ready to train or needs retraining"""
+        try:
+            if not self.config.get('enable_ml_correction', False):
+                return
+                
+            # Check if ML model exists and is trained
+            if (hasattr(self.thermal_model, 'ml_corrector') and 
+                self.thermal_model.ml_corrector and 
+                not self.thermal_model.ml_corrector.is_trained):
+                
+                logger.info("🤖 ML model not yet trained, checking data availability...")
+                
+                # Check how much training data we have
+                training_data = await self.data_store.get_training_data(7)  # Last 7 days
+                data_count = len(training_data) if training_data else 0
+                
+                logger.info(f"📊 Available training data points: {data_count}/100 minimum needed")
+                
+                if data_count >= 100:
+                    logger.info("✅ Sufficient data available, attempting ML model training...")
+                    await self.retrain_ml_model()
+                else:
+                    hours_needed = max(1, (100 - data_count) / 12)  # Estimate based on 5-min intervals
+                    logger.info(f"⏳ Need ~{hours_needed:.1f} more hours of data collection for ML training")
+                    
+        except Exception as e:
+            logger.error(f"Error checking ML training readiness: {e}", exc_info=True)
+
     async def retrain_ml_model(self):
         """Retrain ML correction model"""
         try:
-            logger.info("Starting ML model retraining...")
+            logger.info("🚀 Starting ML model retraining...")
             if hasattr(self.thermal_model, 'retrain_ml_correction'):
                 await self.thermal_model.retrain_ml_correction()
-            logger.info("ML model retraining complete")
+            logger.info("✅ ML model retraining complete")
         except Exception as e:
-            logger.error(f"Error retraining ML model: {e}", exc_info=True)
+            logger.error(f"❌ Error retraining ML model: {e}", exc_info=True)
             
     async def cleanup_old_data(self):
         """Clean up old data from storage"""

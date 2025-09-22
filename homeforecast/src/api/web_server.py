@@ -316,7 +316,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '1.5.0',
+                'addon_version': '1.5.1',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -334,7 +334,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '1.5.0',
+                'version': '1.5.1',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
@@ -557,6 +557,25 @@ def create_app(homeforecast_instance):
             # Run async function in sync context
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
+            
+            # Clear all historical data
+            loop.run_until_complete(app.homeforecast.data_store.clear_all_data())
+            logger.info("✅ Historical data cleared")
+            
+            # Reset thermal model
+            app.homeforecast.thermal_model.reset_model()
+            logger.info("✅ Thermal model reset")
+            
+            # Trigger a full update cycle to restart data collection
+            loop.run_until_complete(app.homeforecast.update_cycle())
+            logger.info("✅ Full update cycle completed")
+            
+            logger.info("✅ API: Model reset completed successfully")
+            return jsonify({'success': True, 'message': 'Model reset and data collection restarted'})
+            
+        except Exception as e:
+            logger.error(f"Error resetting model: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
             
             # Clear database tables
             loop.run_until_complete(app.homeforecast.data_store.clear_all_data())

@@ -20,7 +20,7 @@ class Config:
             'forecast_horizon_hours': 12,
             'comfort_min_temp': 68.0,
             'comfort_max_temp': 75.0,
-            'enable_ml_correction': False,
+            'enable_ml_correction': True,
             'enable_smart_hvac_control': False,
             'ml_retrain_days': 30,
             'data_retention_days': 90,
