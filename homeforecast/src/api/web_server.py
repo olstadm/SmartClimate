@@ -87,7 +87,7 @@ def create_app(homeforecast_instance):
             
             response_data = {
                 'status': 'running',
-                'version': '1.1.3',
+                'version': '1.1.4',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'current_data': current_data,
                 'model_parameters': app.homeforecast.thermal_model.get_parameters(),

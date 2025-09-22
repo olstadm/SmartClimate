@@ -157,28 +157,37 @@ class ForecastEngine:
         for i in range(self.horizon_steps):
             timestamp = current_time + timedelta(minutes=i * self.time_step_minutes)
             
-            # Find matching forecast hour
-            forecast_temp = current_outdoor_temp
-            forecast_humidity = current_outdoor_humidity
-            solar_irradiance = 0
-            matched_hour = None
-            
-            for forecast_hour in forecast_data:
-                forecast_timestamp = forecast_hour.get('timestamp')
-                if hasattr(forecast_timestamp, 'hour'):
-                    if forecast_timestamp.hour == timestamp.hour:
-                        forecast_temp = forecast_hour.get('temperature', forecast_temp)
-                        forecast_humidity = forecast_hour.get('humidity', forecast_humidity)
-                        solar_irradiance = forecast_hour.get('solar_irradiance', 0)
-                        matched_hour = forecast_timestamp.hour
-                        if matched_hour not in forecast_hours_used:
-                            forecast_hours_used.append(matched_hour)
-                            logger.info(f"Hour {matched_hour}: Using forecast temp {forecast_temp}°F, humidity {forecast_humidity}%")
-                        break
+            # For the first few steps (first 30 minutes), use current conditions
+            # This ensures we start with accurate current outdoor temp
+            if i < 6:  # First 30 minutes (6 steps * 5 minutes each)
+                forecast_temp = current_outdoor_temp
+                forecast_humidity = current_outdoor_humidity
+                solar_irradiance = 0
+                if i == 0:
+                    logger.info(f"Step {i}: Using current outdoor conditions: {forecast_temp}°F, {forecast_humidity}%")
+            else:
+                # After 30 minutes, use AccuWeather forecast data
+                forecast_temp = current_outdoor_temp  # Default fallback
+                forecast_humidity = current_outdoor_humidity
+                solar_irradiance = 0
+                matched_hour = None
+                
+                for forecast_hour in forecast_data:
+                    forecast_timestamp = forecast_hour.get('timestamp')
+                    if hasattr(forecast_timestamp, 'hour'):
+                        if forecast_timestamp.hour == timestamp.hour:
+                            forecast_temp = forecast_hour.get('temperature', forecast_temp)
+                            forecast_humidity = forecast_hour.get('humidity', forecast_humidity)
+                            solar_irradiance = forecast_hour.get('solar_irradiance', 0)
+                            matched_hour = forecast_timestamp.hour
+                            if matched_hour not in forecast_hours_used:
+                                forecast_hours_used.append(matched_hour)
+                                logger.info(f"Hour {matched_hour}: Using AccuWeather forecast temp {forecast_temp}°F, humidity {forecast_humidity}%")
+                            break
                         
-            # Interpolate between hours if needed
-            if i > 0 and len(series) > 0:
-                # Simple linear interpolation
+            # Interpolate between hours if needed (but only after initial current conditions period)
+            if i > 6 and len(series) > 0:
+                # Simple linear interpolation for forecast data
                 minutes_into_hour = timestamp.minute
                 if minutes_into_hour > 0:
                     weight = minutes_into_hour / 60.0
