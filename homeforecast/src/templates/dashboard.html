@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HomeForecast - Smart Thermal Forecasting</title>
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1>HomeForecast</h1>
+                <div class="subtitle">Smart Thermal Forecasting for Your Home</div>
+            </div>
+            <div>
+                <button id="updateBtn" class="btn">
+                    <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"/>
+                    </svg>
+                    Update Now
+                </button>
+            </div>
+        </div>
+        
+        <!-- Status Overview -->
+        <div class="grid">
+            <div class="card">
+                <h2>
+                    <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/>
+                    </svg>
+                    System Status
+                </h2>
+                <div class="metric">
+                    <span class="metric-label">Status:</span>
+                    <span class="status status-ok" id="status">Loading...</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Last Update:</span>
+                    <span class="metric-value" id="lastUpdate">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Current Indoor Temp:</span>
+                    <span class="metric-value large" id="currentTemp">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Model Convergence:</span>
+                    <span class="metric-value" id="modelConvergence">-</span>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>
+                    <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z"/>
+                    </svg>
+                    Thermal Model
+                </h2>
+                <div class="metric">
+                    <span class="metric-label">Time Constant:</span>
+                    <span class="metric-value" id="timeConstant">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Heating Rate:</span>
+                    <span class="metric-value" id="heatingRate">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Cooling Rate:</span>
+                    <span class="metric-value" id="coolingRate">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Model Error (MAE):</span>
+                    <span class="metric-value" id="modelError">-</span>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>
+                    <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
+                        <path fill-rule="evenodd" d="M4 5a2 2 0 012-2 1 1 0 000 2H4a1 1 0 00-1 1v6a1 1 0 001 1h1a1 1 0 100 2H4a2 2 0 01-2-2V5zm12 0a2 2 0 00-2-2 1 1 0 100 2h2a1 1 0 011 1v6a1 1 0 01-1 1h-1a1 1 0 100 2h1a2 2 0 002-2V5z" clip-rule="evenodd"/>
+                    </svg>
+                    Comfort Analysis
+                </h2>
+                <div class="metric">
+                    <span class="metric-label">Recommended Mode:</span>
+                    <span class="metric-value large" id="recommendedMode">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Time to Upper Limit:</span>
+                    <span class="metric-value" id="timeToUpper">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Time to Lower Limit:</span>
+                    <span class="metric-value" id="timeToLower">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Comfort Score:</span>
+                    <span class="metric-value" id="comfortScore">-</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabs for different views -->
+        <div class="tabs">
+            <button class="tab active" data-tab="forecast">Forecast</button>
+            <button class="tab" data-tab="analysis">Analysis</button>
+            <button class="tab" data-tab="settings">Settings</button>
+            <button class="tab" data-tab="debug">Debug</button>
+        </div>
+
+        <!-- Forecast Tab -->
+        <div id="forecastTab" class="tab-content active">
+            <div class="card">
+                <h2>Temperature Forecast</h2>
+                <div class="chart-container">
+                    <canvas id="forecastChart"></canvas>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Recommendations</h2>
+                <div class="recommendations" id="recommendations">
+                    <div class="recommendation">Loading recommendations...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Analysis Tab -->
+        <div id="analysisTab" class="tab-content">
+            <div class="grid grid-2">
+                <div class="card">
+                    <h2>Energy Efficiency</h2>
+                    <div class="metric">
+                        <span class="metric-label">Efficiency Score:</span>
+                        <span class="metric-value large" id="efficiencyScore">-</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill efficiency-progress" style="width: 0%"></div>
+                    </div>
+                    <div class="chart-container small">
+                        <canvas id="energyChart"></canvas>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h2>Configuration</h2>
+                    <div class="metric">
+                        <span class="metric-label">Comfort Range:</span>
+                        <span class="metric-value">
+                            <span id="comfortMin">-</span> - <span id="comfortMax">-</span>
+                        </span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">ML Correction:</span>
+                        <span class="metric-value" id="mlEnabled">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">ML Model Status:</span>
+                        <span class="metric-value" id="mlStatus">Not Trained</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">ML Accuracy (R²):</span>
+                        <span class="metric-value" id="mlAccuracy">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Tab -->
+        <div id="settingsTab" class="tab-content">
+            <div class="card">
+                <h2>Configuration</h2>
+                <p>Settings are managed through the Home Assistant addon configuration page.</p>
+                <a href="/homeassistant/hassio/addon/homeforecast/config" class="btn">Open Addon Configuration</a>
+            </div>
+        </div>
+
+        <!-- Debug Tab -->
+        <div id="debugTab" class="tab-content">
+            <div class="grid">
+                <div class="card">
+                    <h2>Database Statistics</h2>
+                    <div class="metric">
+                        <span class="metric-label">Total Measurements:</span>
+                        <span class="metric-value" id="measurementCount">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Total Forecasts:</span>
+                        <span class="metric-value" id="forecastCount">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Data History:</span>
+                        <span class="metric-value" id="dataAge">-</span>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h2>System Information</h2>
+                    <div class="metric">
+                        <span class="metric-label">Addon Version:</span>
+                        <span class="metric-value">1.0.0</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Python Version:</span>
+                        <span class="metric-value">3.11</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Log Level:</span>
+                        <span class="metric-value">INFO</span>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h2>Actions</h2>
+                    <button class="btn btn-secondary" onclick="window.open('/homeassistant/hassio/addon/homeforecast/logs')">
+                        View Logs
+                    </button>
+                    <button class="btn btn-secondary" onclick="dashboard.exportData()">
+                        Export Data
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>

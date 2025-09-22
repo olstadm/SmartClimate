@@ -1,0 +1,58 @@
+name: "HomeForecast"
+version: "1.0.0"
+slug: "homeforecast"
+description: "Smart thermal forecasting for your home - predicts indoor climate and HVAC needs"
+url: "https://github.com/olstadm/SmartClimate"
+arch:
+  - armhf
+  - armv7
+  - aarch64
+  - amd64
+  - i386
+init: false
+map:
+  - config:rw
+options:
+  indoor_temp_entity: ""
+  indoor_humidity_entity: ""
+  outdoor_temp_entity: ""
+  outdoor_humidity_entity: ""
+  hvac_entity: ""
+  accuweather_api_key: ""
+  accuweather_location_key: ""
+  comfort_min_temp: 68.0
+  comfort_max_temp: 75.0
+  forecast_horizon_hours: 12
+  update_interval_minutes: 5
+  enable_ml_correction: false
+  enable_smart_hvac_control: false
+  ml_retrain_days: 30
+  data_retention_days: 90
+schema:
+  indoor_temp_entity: str
+  indoor_humidity_entity: str
+  outdoor_temp_entity: str?
+  outdoor_humidity_entity: str?
+  hvac_entity: str
+  accuweather_api_key: str
+  accuweather_location_key: str
+  comfort_min_temp: float(32.0,86.0)
+  comfort_max_temp: float(32.0,86.0)
+  forecast_horizon_hours: int(1,24)?
+  update_interval_minutes: int(1,60)?
+  enable_ml_correction: bool?
+  enable_smart_hvac_control: bool?
+  ml_retrain_days: int(7,365)?
+  data_retention_days: int(30,365)?
+ports:
+  8099/tcp: 8099
+ports_description:
+  8099/tcp: "Web interface for HomeForecast dashboard"
+homeassistant_api: true
+hassio_api: true
+webui: http://[HOST]:[PORT:8099]
+panel_icon: mdi:home-thermometer-outline
+panel_title: HomeForecast
+startup: application
+boot: auto
+image: ghcr.io/{arch}-homeforecast
