@@ -155,78 +155,170 @@ class HomeAssistantClient:
         return local_time.strftime("%m/%d %I:%M %p")
             
     async def get_sensor_data(self) -> Dict:
-        """Collect current sensor data"""
-        try:
-            logger.info("=== Collecting Local Sensor Data ===")
-            data = {}
-            
-            # Get indoor temperature (in Fahrenheit)
-            indoor_temp_entity = self.config.get('indoor_temp_entity')
-            logger.info(f"Reading indoor temperature from entity: {indoor_temp_entity}")
-            indoor_temp = await self._get_state(indoor_temp_entity)
-            data['indoor_temp'] = float(indoor_temp) if indoor_temp else 70.0
-            logger.info(f"Indoor temperature: {data['indoor_temp']}°F")
-            
-            # Get indoor humidity
-            indoor_humidity_entity = self.config.get('indoor_humidity_entity')
-            logger.info(f"Reading indoor humidity from entity: {indoor_humidity_entity}")
-            indoor_humidity = await self._get_state(indoor_humidity_entity)
-            data['indoor_humidity'] = float(indoor_humidity) if indoor_humidity else 50.0
-            logger.info(f"Indoor humidity: {data['indoor_humidity']}%")
-            
-            # Get outdoor temperature (optional, in Fahrenheit)
-            outdoor_temp_entity = self.config.get('outdoor_temp_entity')
-            if outdoor_temp_entity:
-                logger.info(f"Reading outdoor temperature from entity: {outdoor_temp_entity}")
-                outdoor_temp = await self._get_state(outdoor_temp_entity)
-                data['outdoor_temp'] = float(outdoor_temp) if outdoor_temp else data['indoor_temp']
-                logger.info(f"Local outdoor temperature: {data['outdoor_temp']}°F")
+        """Collect current sensor data with robust error handling"""
+        logger.info("=== Collecting Local Sensor Data ===")
+        data = {
+            'timestamp': datetime.now(),
+            'data_quality': {'missing_sensors': [], 'failed_sensors': [], 'warnings': []}
+        }
+        
+        # Get indoor temperature (required sensor)
+        indoor_temp_entity = self.config.get('indoor_temp_entity')
+        logger.info(f"Reading indoor temperature from entity: {indoor_temp_entity}")
+        
+        indoor_temp = await self._get_state_robust(indoor_temp_entity, 'indoor_temp')
+        if indoor_temp is not None:
+            try:
+                data['indoor_temp'] = float(indoor_temp)
+                logger.info(f"✅ Indoor temperature: {data['indoor_temp']}°F")
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Invalid indoor temperature value '{indoor_temp}': {e}")
+                data['indoor_temp'] = self._get_last_known_value('indoor_temp', 70.0)
+                data['data_quality']['warnings'].append('Using last known indoor temperature')
+        else:
+            logger.warning("❌ Indoor temperature sensor unavailable - using fallback")
+            data['indoor_temp'] = self._get_last_known_value('indoor_temp', 70.0)
+            data['data_quality']['missing_sensors'].append('indoor_temp')
+        
+        # Get indoor humidity (required sensor)
+        indoor_humidity_entity = self.config.get('indoor_humidity_entity')
+        logger.info(f"Reading indoor humidity from entity: {indoor_humidity_entity}")
+        
+        indoor_humidity = await self._get_state_robust(indoor_humidity_entity, 'indoor_humidity')
+        if indoor_humidity is not None:
+            try:
+                humidity_val = float(indoor_humidity)
+                # Validate humidity range
+                if 0 <= humidity_val <= 100:
+                    data['indoor_humidity'] = humidity_val
+                    logger.info(f"✅ Indoor humidity: {data['indoor_humidity']}%")
+                else:
+                    logger.warning(f"Indoor humidity out of range: {humidity_val}%")
+                    data['indoor_humidity'] = self._get_last_known_value('indoor_humidity', 50.0)
+                    data['data_quality']['warnings'].append('Indoor humidity out of range')
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Invalid indoor humidity value '{indoor_humidity}': {e}")
+                data['indoor_humidity'] = self._get_last_known_value('indoor_humidity', 50.0)
+                data['data_quality']['warnings'].append('Invalid indoor humidity format')
+        else:
+            logger.warning("❌ Indoor humidity sensor unavailable - using fallback")
+            data['indoor_humidity'] = self._get_last_known_value('indoor_humidity', 50.0)
+            data['data_quality']['missing_sensors'].append('indoor_humidity')
+        
+        # Get outdoor temperature (optional sensor)
+        outdoor_temp_entity = self.config.get('outdoor_temp_entity')
+        if outdoor_temp_entity:
+            logger.info(f"Reading outdoor temperature from entity: {outdoor_temp_entity}")
+            outdoor_temp = await self._get_state_robust(outdoor_temp_entity, 'outdoor_temp')
+            if outdoor_temp is not None:
+                try:
+                    data['outdoor_temp'] = float(outdoor_temp)
+                    logger.info(f"✅ Local outdoor temperature: {data['outdoor_temp']}°F")
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Invalid outdoor temperature value '{outdoor_temp}': {e}")
+                    data['outdoor_temp'] = None
+                    data['data_quality']['warnings'].append('Invalid outdoor temperature format')
             else:
-                # Will be filled from AccuWeather
+                logger.warning("❌ Outdoor temperature sensor unavailable")
                 data['outdoor_temp'] = None
-                logger.info("No local outdoor temperature sensor - will use AccuWeather data")
-                
-            # Get outdoor humidity (optional)
-            outdoor_humidity_entity = self.config.get('outdoor_humidity_entity')
-            if outdoor_humidity_entity:
-                logger.info(f"Reading outdoor humidity from entity: {outdoor_humidity_entity}")
-                outdoor_humidity = await self._get_state(outdoor_humidity_entity)
-                data['outdoor_humidity'] = float(outdoor_humidity) if outdoor_humidity else 50.0
-                logger.info(f"Local outdoor humidity: {data['outdoor_humidity']}%")
+                data['data_quality']['missing_sensors'].append('outdoor_temp')
+        else:
+            data['outdoor_temp'] = None
+            logger.info("No local outdoor temperature sensor configured - will use AccuWeather data")
+        
+        # Get outdoor humidity (optional sensor)
+        outdoor_humidity_entity = self.config.get('outdoor_humidity_entity')
+        if outdoor_humidity_entity:
+            logger.info(f"Reading outdoor humidity from entity: {outdoor_humidity_entity}")
+            outdoor_humidity = await self._get_state_robust(outdoor_humidity_entity, 'outdoor_humidity')
+            if outdoor_humidity is not None:
+                try:
+                    humidity_val = float(outdoor_humidity)
+                    if 0 <= humidity_val <= 100:
+                        data['outdoor_humidity'] = humidity_val
+                        logger.info(f"✅ Local outdoor humidity: {data['outdoor_humidity']}%")
+                    else:
+                        logger.warning(f"Outdoor humidity out of range: {humidity_val}%")
+                        data['outdoor_humidity'] = None
+                        data['data_quality']['warnings'].append('Outdoor humidity out of range')
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Invalid outdoor humidity value '{outdoor_humidity}': {e}")
+                    data['outdoor_humidity'] = None
+                    data['data_quality']['warnings'].append('Invalid outdoor humidity format')
             else:
+                logger.warning("❌ Outdoor humidity sensor unavailable")
                 data['outdoor_humidity'] = None
-                logger.info("No local outdoor humidity sensor - will use AccuWeather data")
-                
-            # Get comprehensive thermostat data
-            hvac_entity = self.config.get('hvac_entity')
-            logger.info(f"Reading thermostat data from entity: {hvac_entity}")
+                data['data_quality']['missing_sensors'].append('outdoor_humidity')
+        else:
+            data['outdoor_humidity'] = None
+            logger.info("No local outdoor humidity sensor configured - will use AccuWeather data")
+            
+        # Get comprehensive thermostat data (critical for HVAC control)
+        hvac_entity = self.config.get('hvac_entity')
+        logger.info(f"Reading thermostat data from entity: {hvac_entity}")
+        
+        try:
             thermostat_data = await self.get_thermostat_data(hvac_entity)
             
-            # Include thermostat data in sensor data
-            data['hvac_state'] = thermostat_data['hvac_state']
-            data['hvac_mode'] = thermostat_data['hvac_mode']
-            data['hvac_action'] = thermostat_data['hvac_action']
-            data['target_temperature'] = thermostat_data['target_temperature']
+            # Include thermostat data in sensor data with validation
+            data['hvac_state'] = thermostat_data.get('hvac_state', 'unknown')
+            data['hvac_mode'] = thermostat_data.get('hvac_mode', 'off')
+            data['hvac_action'] = thermostat_data.get('hvac_action', 'idle')
+            data['target_temperature'] = thermostat_data.get('target_temperature', data['indoor_temp'])
             data['thermostat_data'] = thermostat_data
             
-            logger.info(f"Thermostat info - State: {data['hvac_state']}, Mode: {data['hvac_mode']}, " +
+            logger.info(f"✅ Thermostat info - State: {data['hvac_state']}, Mode: {data['hvac_mode']}, " +
                        f"Action: {data['hvac_action']}, Target: {data['target_temperature']}°F")
-            
-            # Get solar irradiance if available
-            solar_entity = self.config.get('solar_irradiance_entity')
-            if solar_entity:
-                solar = await self._get_state(solar_entity)
-                data['solar_irradiance'] = float(solar) if solar else 0.0
-            else:
-                data['solar_irradiance'] = 0.0
+                       
+            # Check for thermostat connection issues
+            if thermostat_data.get('connection_status') == 'unavailable':
+                data['data_quality']['warnings'].append('Thermostat connection unstable')
                 
-            data['timestamp'] = datetime.now()
-            
-            return data
-            
         except Exception as e:
-            logger.error(f"Error getting sensor data: {e}")
-            raise
+            logger.error(f"❌ Failed to get thermostat data: {e}")
+            # Use safe defaults for thermostat
+            data['hvac_state'] = 'off'
+            data['hvac_mode'] = 'off'  
+            data['hvac_action'] = 'idle'
+            data['target_temperature'] = data['indoor_temp']
+            data['thermostat_data'] = self._get_default_thermostat_data()
+            data['data_quality']['failed_sensors'].append('hvac_thermostat')
+            logger.warning("Using default thermostat values due to connection failure")
+        
+        # Get solar irradiance if available
+        solar_entity = self.config.get('solar_irradiance_entity')
+        if solar_entity:
+            logger.info(f"Reading solar irradiance from entity: {solar_entity}")
+            solar = await self._get_state_robust(solar_entity, 'solar_irradiance')
+            if solar is not None:
+                try:
+                    solar_val = float(solar)
+                    data['solar_irradiance'] = max(0.0, solar_val)  # Ensure non-negative
+                    logger.info(f"✅ Solar irradiance: {data['solar_irradiance']} W/m²")
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Invalid solar irradiance value '{solar}': {e}")
+                    data['solar_irradiance'] = 0.0
+                    data['data_quality']['warnings'].append('Invalid solar irradiance format')
+            else:
+                logger.warning("❌ Solar irradiance sensor unavailable")
+                data['solar_irradiance'] = 0.0
+                data['data_quality']['missing_sensors'].append('solar_irradiance')
+        else:
+            data['solar_irradiance'] = 0.0
+            logger.info("No solar irradiance sensor configured")
+            
+        # Cache current values for future fallbacks
+        self._cache_sensor_values(data)
+        
+        # Log data quality summary
+        quality = data['data_quality']
+        if quality['missing_sensors'] or quality['failed_sensors'] or quality['warnings']:
+            logger.warning(f"📊 Data Quality Issues - Missing: {quality['missing_sensors']}, " +
+                         f"Failed: {quality['failed_sensors']}, Warnings: {len(quality['warnings'])}")
+        else:
+            logger.info("📊 All sensor data collected successfully")
+            
+        return data
             
     async def _get_state(self, entity_id: str) -> Optional[str]:
         """Get state of an entity"""
@@ -245,6 +337,123 @@ class HomeAssistantClient:
         except Exception as e:
             logger.error(f"Error getting state for {entity_id}: {e}")
             return None
+
+    async def _get_state_robust(self, entity_id: str, sensor_type: str, retries: int = 2) -> Optional[str]:
+        """Get state of an entity with retry logic and staleness detection"""
+        if not entity_id:
+            logger.warning(f"No entity_id provided for {sensor_type}")
+            return None
+            
+        for attempt in range(retries + 1):
+            try:
+                async with self.session.get(
+                    f"{self.base_url}/states/{entity_id}",
+                    headers=self.headers,
+                    timeout=aiohttp.ClientTimeout(total=10)  # 10 second timeout
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        state = data.get('state')
+                        
+                        # Check for unavailable states
+                        if state in ['unavailable', 'unknown', 'none', None, '']:
+                            logger.warning(f"Entity {entity_id} state is '{state}' on attempt {attempt + 1}")
+                            if attempt < retries:
+                                await asyncio.sleep(1)  # Brief delay before retry
+                                continue
+                            return None
+                            
+                        # Check data freshness
+                        last_changed = data.get('last_changed')
+                        if last_changed and self._is_data_stale(last_changed, sensor_type):
+                            logger.warning(f"Entity {entity_id} data is stale (last changed: {last_changed})")
+                            # Continue anyway but log the staleness
+                            
+                        return state
+                        
+                    elif resp.status == 404:
+                        logger.error(f"Entity {entity_id} not found (404)")
+                        return None
+                    else:
+                        logger.warning(f"Failed to get state for {entity_id}: HTTP {resp.status} on attempt {attempt + 1}")
+                        if attempt < retries:
+                            await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                            continue
+                        return None
+                        
+            except asyncio.TimeoutError:
+                logger.warning(f"Timeout getting state for {entity_id} on attempt {attempt + 1}")
+                if attempt < retries:
+                    await asyncio.sleep(1)
+                    continue
+                return None
+            except Exception as e:
+                logger.warning(f"Error getting state for {entity_id} on attempt {attempt + 1}: {e}")
+                if attempt < retries:
+                    await asyncio.sleep(1)
+                    continue
+                return None
+                
+        return None
+
+    def _is_data_stale(self, last_changed_str: str, sensor_type: str) -> bool:
+        """Check if sensor data is too old to be reliable"""
+        try:
+            last_changed = datetime.fromisoformat(last_changed_str.replace('Z', '+00:00'))
+            now = datetime.now(last_changed.tzinfo) if last_changed.tzinfo else datetime.now()
+            age_minutes = (now - last_changed).total_seconds() / 60
+            
+            # Define staleness thresholds by sensor type
+            thresholds = {
+                'indoor_temp': 15,      # Indoor sensors should update frequently
+                'indoor_humidity': 15,
+                'outdoor_temp': 60,     # Outdoor sensors can be less frequent
+                'outdoor_humidity': 60,
+                'solar_irradiance': 30,
+                'hvac': 5              # HVAC state should be very current
+            }
+            
+            threshold = thresholds.get(sensor_type, 30)  # Default 30 minutes
+            return age_minutes > threshold
+            
+        except Exception as e:
+            logger.warning(f"Could not parse last_changed time '{last_changed_str}': {e}")
+            return False
+
+    def _get_last_known_value(self, sensor_type: str, default_value: float) -> float:
+        """Get last known good value for a sensor type with fallback"""
+        # Initialize cache if needed
+        if not hasattr(self, '_sensor_cache'):
+            self._sensor_cache = {}
+            
+        cached_value = self._sensor_cache.get(sensor_type)
+        if cached_value is not None:
+            logger.info(f"Using cached value for {sensor_type}: {cached_value}")
+            return cached_value
+            
+        logger.info(f"No cached value for {sensor_type}, using default: {default_value}")
+        return default_value
+
+    def _cache_sensor_values(self, data: Dict):
+        """Cache current sensor values for future fallback use"""
+        if not hasattr(self, '_sensor_cache'):
+            self._sensor_cache = {}
+            
+        # Cache only valid numeric values
+        cache_mapping = {
+            'indoor_temp': data.get('indoor_temp'),
+            'indoor_humidity': data.get('indoor_humidity'), 
+            'outdoor_temp': data.get('outdoor_temp'),
+            'outdoor_humidity': data.get('outdoor_humidity'),
+            'solar_irradiance': data.get('solar_irradiance')
+        }
+        
+        for key, value in cache_mapping.items():
+            if value is not None and isinstance(value, (int, float)) and not math.isnan(value):
+                self._sensor_cache[key] = value
+                
+        # Add timestamp to cache
+        self._sensor_cache['last_update'] = datetime.now()
             
     async def _get_climate_state(self, entity_id: str) -> str:
         """Get HVAC operating state from climate entity (for backward compatibility)"""
@@ -340,72 +549,292 @@ class HomeAssistantClient:
         }
             
     async def get_weather_forecast(self) -> Dict:
-        """Get weather forecast from AccuWeather"""
-        try:
-            logger.info("=== Getting Weather Forecast from AccuWeather ===")
+        """Get weather forecast from AccuWeather with robust error handling and fallbacks"""
+        logger.info("=== Getting Weather Forecast from AccuWeather ===")
+        
+        # Check configuration
+        api_key = self.config.get('accuweather_api_key')
+        location_key = self.config.get('accuweather_location_key')
+        
+        if not api_key or not location_key:
+            logger.error("❌ AccuWeather API credentials not configured")
+            return self._get_fallback_weather_data("Missing API credentials")
             
-            # Get current conditions and 12-hour forecast from AccuWeather
-            api_key = self.config.get('accuweather_api_key')
-            location_key = self.config.get('accuweather_location_key')
+        logger.info(f"AccuWeather API configured: Location key = {location_key[:8]}... API key = {'*' * len(api_key[:-4]) + api_key[-4:] if len(api_key) > 4 else 'Yes'}")
+        
+        forecast_data = {
+            'hourly_forecast': [],
+            'current_outdoor': {},
+            'data_quality': {'source': 'accuweather', 'issues': []}
+        }
+        
+        # Try to get current conditions with retry logic
+        current_success = await self._get_accuweather_current(api_key, location_key, forecast_data)
+        
+        # Try to get forecast with retry logic  
+        forecast_success = await self._get_accuweather_forecast(api_key, location_key, forecast_data)
+        
+        # If both failed, return fallback data
+        if not current_success and not forecast_success:
+            logger.error("❌ Complete AccuWeather API failure - using fallback weather data")
+            return self._get_fallback_weather_data("API completely unavailable")
+        
+        # If we got some data but not all, log the issue
+        if not current_success:
+            forecast_data['data_quality']['issues'].append('Current conditions unavailable')
+        if not forecast_success:
+            forecast_data['data_quality']['issues'].append('Forecast data unavailable')
             
-            logger.info(f"AccuWeather API configured: Location key = {location_key[:8]}... API key = {'Yes' if api_key else 'No'}")
+        # Cache successful data for future fallbacks
+        if current_success or forecast_success:
+            self._cache_weather_data(forecast_data)
             
-            forecast_data = {
-                'hourly_forecast': [],
-                'current_outdoor': {}
-            }
-            
-            # Get current conditions
-            current_url = f"http://dataservice.accuweather.com/currentconditions/v1/{location_key}"
-            params = {'apikey': api_key, 'details': 'true'}
-            
-            async with self.session.get(current_url, params=params) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    logger.info("✅ Successfully retrieved AccuWeather current conditions")
-                    if data and len(data) > 0:
-                        current = data[0]
-                        current_temp = current['Temperature']['Imperial']['Value']
-                        current_humidity = current['RelativeHumidity']
-                        logger.info(f"Current AccuWeather data: {current_temp}°F, {current_humidity}% humidity")
-                        forecast_data['current_outdoor'] = {
-                            'temperature': current_temp,
-                            'humidity': current_humidity,
-                            'solar_irradiance': self._estimate_solar_irradiance(current)
-                        }
-                else:
-                    logger.error(f"❌ Failed to get AccuWeather current conditions: HTTP {resp.status}")
+        return forecast_data
+
+    async def _get_accuweather_current(self, api_key: str, location_key: str, forecast_data: Dict, retries: int = 2) -> bool:
+        """Get current conditions from AccuWeather with retry logic"""
+        current_url = f"http://dataservice.accuweather.com/currentconditions/v1/{location_key}"
+        
+        for attempt in range(retries + 1):
+            try:
+                params = {'apikey': api_key, 'details': 'true'}
+                timeout = aiohttp.ClientTimeout(total=15)  # 15 second timeout
+                
+                async with self.session.get(current_url, params=params, timeout=timeout) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data and len(data) > 0:
+                            current = data[0]
+                            current_temp = current['Temperature']['Imperial']['Value']
+                            current_humidity = current['RelativeHumidity']
+                            
+                            # Validate data ranges
+                            if not (-50 <= current_temp <= 150):  # Reasonable temperature range
+                                logger.warning(f"AccuWeather temperature out of range: {current_temp}°F")
+                                if attempt < retries:
+                                    await asyncio.sleep(2 ** attempt)
+                                    continue
+                                return False
+                                
+                            if not (0 <= current_humidity <= 100):  # Humidity validation
+                                logger.warning(f"AccuWeather humidity out of range: {current_humidity}%")
+                                current_humidity = max(0, min(100, current_humidity))  # Clamp to valid range
+                            
+                            forecast_data['current_outdoor'] = {
+                                'temperature': current_temp,
+                                'humidity': current_humidity,
+                                'solar_irradiance': self._estimate_solar_irradiance(current)
+                            }
+                            
+                            logger.info(f"✅ AccuWeather current conditions: {current_temp}°F, {current_humidity}% humidity")
+                            return True
+                        else:
+                            logger.warning(f"Empty AccuWeather current conditions response on attempt {attempt + 1}")
+                            
+                    elif resp.status == 401:
+                        logger.error("❌ AccuWeather API authentication failed - check API key")
+                        return False
+                    elif resp.status == 403:
+                        logger.error("❌ AccuWeather API quota exceeded or forbidden")
+                        return False  
+                    elif resp.status == 503:
+                        logger.warning(f"AccuWeather service temporarily unavailable (503) - attempt {attempt + 1}")
+                        if attempt < retries:
+                            await asyncio.sleep(5 + (2 ** attempt))  # Longer delay for service issues
+                            continue
+                    else:
+                        logger.warning(f"AccuWeather current conditions failed: HTTP {resp.status} on attempt {attempt + 1}")
                         
-            # Get 12-hour forecast
-            forecast_url = f"http://dataservice.accuweather.com/forecasts/v1/hourly/12hour/{location_key}"
+            except asyncio.TimeoutError:
+                logger.warning(f"Timeout getting AccuWeather current conditions on attempt {attempt + 1}")
+            except Exception as e:
+                logger.warning(f"Error getting AccuWeather current conditions on attempt {attempt + 1}: {e}")
+                
+            # Wait before retry (exponential backoff)
+            if attempt < retries:
+                await asyncio.sleep(2 ** attempt)
+                
+        return False
+
+    async def _get_accuweather_forecast(self, api_key: str, location_key: str, forecast_data: Dict, retries: int = 2) -> bool:
+        """Get forecast from AccuWeather with retry logic"""
+        forecast_url = f"http://dataservice.accuweather.com/forecasts/v1/hourly/12hour/{location_key}"
+        
+        for attempt in range(retries + 1):
+            try:
+                params = {'apikey': api_key, 'metric': 'false'}
+                timeout = aiohttp.ClientTimeout(total=20)  # Longer timeout for larger response
+                
+                async with self.session.get(forecast_url, params=params, timeout=timeout) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data and len(data) > 0:
+                            valid_hours = 0
+                            for hour in data:
+                                try:
+                                    temp = hour['Temperature']['Value']
+                                    humidity = hour.get('RelativeHumidity', 50)
+                                    
+                                    # Validate forecast data
+                                    if not (-50 <= temp <= 150):
+                                        logger.warning(f"Skipping invalid forecast temperature: {temp}°F")
+                                        continue
+                                        
+                                    if not (0 <= humidity <= 100):
+                                        humidity = max(0, min(100, humidity))  # Clamp humidity
+                                        
+                                    forecast_data['hourly_forecast'].append({
+                                        'timestamp': datetime.fromisoformat(hour['DateTime'].replace('Z', '+00:00')),
+                                        'temperature': temp,
+                                        'humidity': humidity,
+                                        'solar_irradiance': self._calculate_solar_irradiance(hour),
+                                        'precipitation_probability': hour.get('PrecipitationProbability', 0)
+                                    })
+                                    valid_hours += 1
+                                    
+                                except Exception as e:
+                                    logger.warning(f"Skipping invalid forecast hour: {e}")
+                                    continue
+                                    
+                            if valid_hours > 0:
+                                logger.info(f"✅ AccuWeather forecast: {valid_hours} valid hours retrieved")
+                                return True
+                            else:
+                                logger.warning("No valid forecast hours found")
+                                
+                    elif resp.status == 401:
+                        logger.error("❌ AccuWeather API authentication failed - check API key")
+                        return False
+                    elif resp.status == 403:
+                        logger.error("❌ AccuWeather API quota exceeded or forbidden")
+                        return False
+                    elif resp.status == 503:
+                        logger.warning(f"AccuWeather service temporarily unavailable (503) - attempt {attempt + 1}")
+                        if attempt < retries:
+                            await asyncio.sleep(5 + (2 ** attempt))
+                            continue
+                    else:
+                        logger.warning(f"AccuWeather forecast failed: HTTP {resp.status} on attempt {attempt + 1}")
+                        
+            except asyncio.TimeoutError:
+                logger.warning(f"Timeout getting AccuWeather forecast on attempt {attempt + 1}")
+            except Exception as e:
+                logger.warning(f"Error getting AccuWeather forecast on attempt {attempt + 1}: {e}")
+                
+            # Wait before retry
+            if attempt < retries:
+                await asyncio.sleep(2 ** attempt)
+                
+        return False
+
+    def _get_fallback_weather_data(self, reason: str) -> Dict:
+        """Generate fallback weather data when AccuWeather is unavailable"""
+        logger.info(f"🔄 Generating fallback weather data - Reason: {reason}")
+        
+        # Try to use cached weather data first
+        cached_weather = self._get_cached_weather_data()
+        if cached_weather:
+            logger.info("Using cached weather data as fallback")
+            cached_weather['data_quality'] = {
+                'source': 'cached_accuweather',
+                'issues': [f'AccuWeather unavailable: {reason}']
+            }
+            return cached_weather
             
-            async with self.session.get(forecast_url, params={'apikey': api_key, 'metric': 'false'}) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    logger.info(f"✅ Successfully retrieved AccuWeather 12-hour forecast ({len(data)} hours)")
-                    
-                    for hour in data:
-                        forecast_data['hourly_forecast'].append({
-                            'timestamp': datetime.fromisoformat(hour['DateTime'].replace('Z', '+00:00')),
-                            'temperature': hour['Temperature']['Value'],
-                            'humidity': hour.get('RelativeHumidity', 50),
-                            'solar_irradiance': self._calculate_solar_irradiance(hour),
-                            'precipitation_probability': hour.get('PrecipitationProbability', 0)
-                        })
-                    
-                    # Log forecast range
-                    if data:
-                        first_hour = data[0]['DateTime']
-                        last_hour = data[-1]['DateTime'] 
-                        logger.info(f"Forecast range: {first_hour} to {last_hour}")
-                else:
-                    logger.error(f"❌ Failed to get AccuWeather forecast: HTTP {resp.status}")
-                    
-            return forecast_data
+        # If no cache, generate reasonable estimates based on season and time
+        now = datetime.now()
+        base_temp = self._estimate_seasonal_temperature(now)
+        
+        fallback_data = {
+            'hourly_forecast': [],
+            'current_outdoor': {
+                'temperature': base_temp,
+                'humidity': 50.0,  # Neutral humidity
+                'solar_irradiance': self._estimate_solar_irradiance_simple(now)
+            },
+            'data_quality': {
+                'source': 'estimated',
+                'issues': [f'AccuWeather unavailable: {reason}', 'Using seasonal temperature estimates']
+            }
+        }
+        
+        # Generate simple 12-hour forecast
+        for hour in range(12):
+            forecast_time = now + timedelta(hours=hour + 1)
+            temp_variation = self._estimate_temperature_variation(forecast_time, base_temp)
             
-        except Exception as e:
-            logger.error(f"Error getting weather forecast: {e}")
-            return {'hourly_forecast': [], 'current_outdoor': {}}
+            fallback_data['hourly_forecast'].append({
+                'timestamp': forecast_time,
+                'temperature': base_temp + temp_variation,
+                'humidity': 50.0,  # Static humidity estimate
+                'solar_irradiance': self._estimate_solar_irradiance_simple(forecast_time),
+                'precipitation_probability': 10  # Low probability estimate
+            })
+            
+        logger.warning(f"Generated fallback weather data with base temperature {base_temp}°F")
+        return fallback_data
+
+    def _estimate_seasonal_temperature(self, dt: datetime) -> float:
+        """Estimate reasonable outdoor temperature based on season"""
+        # Simple seasonal temperature estimation (Northern hemisphere assumed)
+        day_of_year = dt.timetuple().tm_yday
+        
+        # Rough seasonal cycle: coldest ~day 15 (mid-Jan), warmest ~day 196 (mid-July)
+        seasonal_variation = 30 * math.sin((day_of_year - 15) * 2 * math.pi / 365)
+        base_temp = 60 + seasonal_variation  # 60°F average with ±30°F seasonal swing
+        
+        # Daily temperature variation
+        hour = dt.hour
+        daily_variation = 10 * math.sin((hour - 6) * math.pi / 12)  # Peak at 2 PM, minimum at 6 AM
+        
+        return round(base_temp + daily_variation, 1)
+
+    def _estimate_temperature_variation(self, forecast_time: datetime, base_temp: float) -> float:
+        """Estimate temperature change from base temperature"""
+        # Simple daily cycle variation
+        hour = forecast_time.hour
+        daily_cycle = 8 * math.sin((hour - 6) * math.pi / 12)  # ±8°F daily variation
+        return daily_cycle
+
+    def _estimate_solar_irradiance_simple(self, dt: datetime) -> float:
+        """Simple solar irradiance estimation based on time of day"""
+        hour = dt.hour
+        
+        # Solar irradiance follows roughly a sine curve during daylight hours
+        if 6 <= hour <= 18:  # Daylight hours
+            # Peak at noon (hour 12), zero at 6 AM/6 PM
+            solar_angle = (hour - 6) * math.pi / 12
+            return max(0, 800 * math.sin(solar_angle))  # Max 800 W/m²
+        else:
+            return 0.0
+
+    def _cache_weather_data(self, weather_data: Dict):
+        """Cache weather data for fallback use"""
+        if not hasattr(self, '_weather_cache'):
+            self._weather_cache = {}
+            
+        # Only cache if we have actual data
+        if weather_data.get('current_outdoor') or weather_data.get('hourly_forecast'):
+            self._weather_cache = {
+                'data': weather_data.copy(),
+                'timestamp': datetime.now()
+            }
+            logger.debug("Cached weather data for fallback use")
+
+    def _get_cached_weather_data(self) -> Optional[Dict]:
+        """Get cached weather data if recent enough"""
+        if not hasattr(self, '_weather_cache') or not self._weather_cache:
+            return None
+            
+        cache_age_hours = (datetime.now() - self._weather_cache['timestamp']).total_seconds() / 3600
+        
+        # Use cached data if less than 2 hours old
+        if cache_age_hours < 2:
+            logger.info(f"Using weather cache from {cache_age_hours:.1f} hours ago")
+            return self._weather_cache['data'].copy()
+        else:
+            logger.info(f"Weather cache too old ({cache_age_hours:.1f} hours)")
+            return None
             
     def _estimate_solar_irradiance(self, current_data: Dict) -> float:
         """Estimate solar irradiance from current conditions"""

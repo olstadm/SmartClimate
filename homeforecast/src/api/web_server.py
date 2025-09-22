@@ -648,9 +648,395 @@ information about HomeForecast operation.
         except Exception as e:
             return jsonify({'error': f'Error: {str(e)}'}), 500
     
+    @app.route('/api/health')
+    def get_system_health():
+        """Get comprehensive system health and data quality information"""
+        try:
+            logger.info("🌐 API: Processing /api/health request")
+            
+            health_data = {
+                'timestamp': datetime.now().isoformat(),
+                'overall_status': 'unknown',
+                'sensor_status': {},
+                'weather_status': {},
+                'system_metrics': {},
+                'data_quality': {},
+                'recommendations': []
+            }
+            
+            # Check sensor connectivity and data freshness
+            sensor_health = check_sensor_health(app.homeforecast)
+            health_data['sensor_status'] = sensor_health
+            
+            # Check weather data availability
+            weather_health = check_weather_health(app.homeforecast)
+            health_data['weather_status'] = weather_health
+            
+            # Get system performance metrics
+            system_metrics = get_system_metrics(app.homeforecast)
+            health_data['system_metrics'] = system_metrics
+            
+            # Analyze data quality
+            data_quality = analyze_data_quality(app.homeforecast)
+            health_data['data_quality'] = data_quality
+            
+            # Generate health recommendations
+            recommendations = generate_health_recommendations(health_data)
+            health_data['recommendations'] = recommendations
+            
+            # Calculate overall health status
+            health_data['overall_status'] = calculate_overall_health(health_data)
+            
+            return jsonify(health_data)
+            
+        except Exception as e:
+            logger.error(f"Error getting system health: {e}")
+            return jsonify({
+                'error': str(e),
+                'overall_status': 'error',
+                'timestamp': datetime.now().isoformat()
+            }), 500
+
     @app.route('/logs')
     def logs_page():
         """Logs viewer page"""
         return render_template('logs.html')
         
     return app
+
+
+def check_sensor_health(homeforecast_instance):
+    """Check the health and connectivity of all sensors"""
+    sensor_status = {
+        'connected_sensors': [],
+        'disconnected_sensors': [],
+        'stale_sensors': [],
+        'sensor_quality': {}
+    }
+    
+    try:
+        # Get last sensor data if available
+        last_data = getattr(homeforecast_instance, 'last_sensor_data', {})
+        data_quality = last_data.get('data_quality', {})
+        
+        # Required sensors
+        required_sensors = ['indoor_temp', 'indoor_humidity', 'hvac_thermostat']
+        optional_sensors = ['outdoor_temp', 'outdoor_humidity', 'solar_irradiance']
+        
+        # Check required sensors
+        missing_sensors = data_quality.get('missing_sensors', [])
+        failed_sensors = data_quality.get('failed_sensors', [])
+        
+        for sensor in required_sensors:
+            if sensor in missing_sensors:
+                sensor_status['disconnected_sensors'].append(sensor)
+                sensor_status['sensor_quality'][sensor] = 'missing'
+            elif sensor in failed_sensors:
+                sensor_status['disconnected_sensors'].append(sensor)
+                sensor_status['sensor_quality'][sensor] = 'failed'
+            else:
+                sensor_status['connected_sensors'].append(sensor)
+                sensor_status['sensor_quality'][sensor] = 'good'
+        
+        # Check optional sensors
+        for sensor in optional_sensors:
+            if sensor in missing_sensors:
+                sensor_status['sensor_quality'][sensor] = 'not_configured'
+            elif sensor in failed_sensors:
+                sensor_status['sensor_quality'][sensor] = 'failed'
+            elif last_data.get(sensor) is not None:
+                sensor_status['connected_sensors'].append(sensor)
+                sensor_status['sensor_quality'][sensor] = 'good'
+            else:
+                sensor_status['sensor_quality'][sensor] = 'not_configured'
+                
+    except Exception as e:
+        logger.error(f"Error checking sensor health: {e}")
+        sensor_status['error'] = str(e)
+        
+    return sensor_status
+
+
+def check_weather_health(homeforecast_instance):
+    """Check the health and availability of weather data sources"""
+    weather_status = {
+        'accuweather_available': False,
+        'data_source': 'unknown',
+        'last_successful_fetch': None,
+        'api_issues': [],
+        'forecast_coverage': 0
+    }
+    
+    try:
+        # Check if we have weather cache or recent data
+        ha_client = getattr(homeforecast_instance, 'ha_client', None)
+        if ha_client and hasattr(ha_client, '_weather_cache'):
+            cache = ha_client._weather_cache
+            if cache:
+                cache_age = (datetime.now() - cache['timestamp']).total_seconds() / 3600
+                weather_status['last_successful_fetch'] = cache['timestamp'].isoformat()
+                
+                # Check cache data quality
+                cached_data = cache.get('data', {})
+                quality = cached_data.get('data_quality', {})
+                weather_status['data_source'] = quality.get('source', 'cached')
+                weather_status['api_issues'] = quality.get('issues', [])
+                
+                # Check forecast coverage
+                hourly_forecast = cached_data.get('hourly_forecast', [])
+                weather_status['forecast_coverage'] = len(hourly_forecast)
+                
+                if cache_age < 2:  # Fresh data
+                    weather_status['accuweather_available'] = quality.get('source') == 'accuweather'
+                else:
+                    weather_status['api_issues'].append('Stale weather cache')
+        
+        # Check API credentials
+        config = getattr(homeforecast_instance, 'config', None)
+        if config:
+            api_key = config.get('accuweather_api_key')
+            location_key = config.get('accuweather_location_key')
+            
+            if not api_key:
+                weather_status['api_issues'].append('AccuWeather API key not configured')
+            if not location_key:
+                weather_status['api_issues'].append('AccuWeather location key not configured')
+                
+    except Exception as e:
+        logger.error(f"Error checking weather health: {e}")
+        weather_status['error'] = str(e)
+        
+    return weather_status
+
+
+def get_system_metrics(homeforecast_instance):
+    """Get system performance and operational metrics"""
+    metrics = {
+        'uptime_hours': 0,
+        'total_updates': 0,
+        'successful_updates': 0,
+        'model_accuracy': None,
+        'data_points_collected': 0,
+        'ml_model_trained': False
+    }
+    
+    try:
+        # Calculate uptime
+        start_time = getattr(homeforecast_instance, 'start_time', datetime.now())
+        uptime_seconds = (datetime.now() - start_time).total_seconds()
+        metrics['uptime_hours'] = round(uptime_seconds / 3600, 1)
+        
+        # Get thermal model statistics
+        thermal_model = getattr(homeforecast_instance, 'thermal_model', None)
+        if thermal_model:
+            params = thermal_model.get_parameters()
+            metrics['total_updates'] = len(getattr(thermal_model, 'parameter_history', []))
+            
+            # Check ML model status
+            ml_corrector = getattr(thermal_model, 'ml_corrector', None)
+            if ml_corrector:
+                metrics['ml_model_trained'] = getattr(ml_corrector, 'is_trained', False)
+                performance = getattr(ml_corrector, 'performance_history', [])
+                if performance:
+                    latest_perf = performance[-1]
+                    metrics['model_accuracy'] = round(latest_perf.get('accuracy', 0) * 100, 1)
+        
+        # Get data store statistics
+        data_store = getattr(homeforecast_instance, 'data_store', None)
+        if data_store:
+            try:
+                stats = data_store.get_statistics()
+                metrics['data_points_collected'] = stats.get('total_measurements', 0)
+            except Exception:
+                pass  # Data store statistics optional
+                
+    except Exception as e:
+        logger.error(f"Error getting system metrics: {e}")
+        metrics['error'] = str(e)
+        
+    return metrics
+
+
+def analyze_data_quality(homeforecast_instance):
+    """Analyze overall data quality and consistency"""
+    quality = {
+        'overall_score': 0,
+        'sensor_reliability': 0,
+        'weather_reliability': 0,
+        'data_freshness': 0,
+        'issues_detected': []
+    }
+    
+    try:
+        # Analyze sensor data quality
+        last_data = getattr(homeforecast_instance, 'last_sensor_data', {})
+        data_quality = last_data.get('data_quality', {})
+        
+        missing_count = len(data_quality.get('missing_sensors', []))
+        failed_count = len(data_quality.get('failed_sensors', []))
+        warning_count = len(data_quality.get('warnings', []))
+        
+        # Calculate sensor reliability (0-100)
+        total_sensors = 6  # Expected total sensors
+        working_sensors = total_sensors - missing_count - failed_count
+        quality['sensor_reliability'] = max(0, (working_sensors / total_sensors) * 100)
+        
+        # Check data freshness
+        if last_data.get('timestamp'):
+            data_age = (datetime.now() - last_data['timestamp']).total_seconds() / 60
+            if data_age < 10:
+                quality['data_freshness'] = 100
+            elif data_age < 30:
+                quality['data_freshness'] = 80
+            elif data_age < 60:
+                quality['data_freshness'] = 60
+            else:
+                quality['data_freshness'] = 30
+                quality['issues_detected'].append(f'Sensor data is {data_age:.0f} minutes old')
+        
+        # Check weather data quality
+        ha_client = getattr(homeforecast_instance, 'ha_client', None)
+        if ha_client and hasattr(ha_client, '_weather_cache'):
+            cache = ha_client._weather_cache
+            if cache:
+                cache_age_hours = (datetime.now() - cache['timestamp']).total_seconds() / 3600
+                if cache_age_hours < 1:
+                    quality['weather_reliability'] = 100
+                elif cache_age_hours < 3:
+                    quality['weather_reliability'] = 80
+                elif cache_age_hours < 6:
+                    quality['weather_reliability'] = 60
+                else:
+                    quality['weather_reliability'] = 30
+                    quality['issues_detected'].append('Weather data is stale')
+            else:
+                quality['weather_reliability'] = 0
+                quality['issues_detected'].append('No weather data available')
+        else:
+            quality['weather_reliability'] = 0
+            quality['issues_detected'].append('Weather service not configured')
+        
+        # Calculate overall score
+        quality['overall_score'] = round(
+            (quality['sensor_reliability'] * 0.4 + 
+             quality['weather_reliability'] * 0.3 + 
+             quality['data_freshness'] * 0.3)
+        )
+        
+        # Add specific issues
+        if missing_count > 0:
+            quality['issues_detected'].append(f'{missing_count} sensors not configured')
+        if failed_count > 0:
+            quality['issues_detected'].append(f'{failed_count} sensors failed')
+        if warning_count > 0:
+            quality['issues_detected'].append(f'{warning_count} data validation warnings')
+            
+    except Exception as e:
+        logger.error(f"Error analyzing data quality: {e}")
+        quality['error'] = str(e)
+        
+    return quality
+
+
+def generate_health_recommendations(health_data):
+    """Generate actionable recommendations based on health analysis"""
+    recommendations = []
+    
+    try:
+        sensor_status = health_data.get('sensor_status', {})
+        weather_status = health_data.get('weather_status', {})
+        data_quality = health_data.get('data_quality', {})
+        
+        # Sensor recommendations
+        disconnected = sensor_status.get('disconnected_sensors', [])
+        if 'indoor_temp' in disconnected:
+            recommendations.append({
+                'priority': 'high',
+                'category': 'sensors',
+                'message': 'Indoor temperature sensor is disconnected - check entity configuration',
+                'action': 'Verify indoor_temp_entity setting in addon configuration'
+            })
+            
+        if 'hvac_thermostat' in disconnected:
+            recommendations.append({
+                'priority': 'high', 
+                'category': 'sensors',
+                'message': 'HVAC thermostat is unreachable - check device connectivity',
+                'action': 'Verify hvac_entity setting and thermostat network connection'
+            })
+            
+        # Weather recommendations
+        if not weather_status.get('accuweather_available', False):
+            api_issues = weather_status.get('api_issues', [])
+            if 'API key not configured' in str(api_issues):
+                recommendations.append({
+                    'priority': 'medium',
+                    'category': 'weather',
+                    'message': 'AccuWeather API not configured - using fallback weather data',
+                    'action': 'Configure AccuWeather API credentials for accurate forecasts'
+                })
+            else:
+                recommendations.append({
+                    'priority': 'medium',
+                    'category': 'weather', 
+                    'message': 'AccuWeather API experiencing issues - check API limits',
+                    'action': 'Verify API key validity and check usage quotas'
+                })
+                
+        # Data quality recommendations
+        overall_score = data_quality.get('overall_score', 0)
+        if overall_score < 70:
+            recommendations.append({
+                'priority': 'medium',
+                'category': 'data_quality',
+                'message': f'Data quality is suboptimal ({overall_score}%) - system accuracy may be reduced',
+                'action': 'Address sensor connectivity and weather API issues'
+            })
+            
+        # Performance recommendations
+        metrics = health_data.get('system_metrics', {})
+        if not metrics.get('ml_model_trained', False):
+            uptime = metrics.get('uptime_hours', 0)
+            if uptime > 24:
+                recommendations.append({
+                    'priority': 'low',
+                    'category': 'performance',
+                    'message': 'ML correction model not yet trained - accuracy will improve over time',
+                    'action': 'Allow system to collect more data for automatic ML training'
+                })
+                
+    except Exception as e:
+        logger.error(f"Error generating recommendations: {e}")
+        
+    return recommendations
+
+
+def calculate_overall_health(health_data):
+    """Calculate overall system health status"""
+    try:
+        sensor_status = health_data.get('sensor_status', {})
+        weather_status = health_data.get('weather_status', {})
+        data_quality = health_data.get('data_quality', {})
+        
+        # Check for critical issues
+        disconnected = sensor_status.get('disconnected_sensors', [])
+        critical_sensors = ['indoor_temp', 'hvac_thermostat']
+        
+        if any(sensor in disconnected for sensor in critical_sensors):
+            return 'critical'
+            
+        # Check overall data quality score
+        quality_score = data_quality.get('overall_score', 0)
+        
+        if quality_score >= 80:
+            return 'excellent'
+        elif quality_score >= 60:
+            return 'good' 
+        elif quality_score >= 40:
+            return 'fair'
+        else:
+            return 'poor'
+            
+    except Exception as e:
+        logger.error(f"Error calculating overall health: {e}")
+        return 'unknown'

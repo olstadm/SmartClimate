@@ -11,6 +11,7 @@ import sys
 import signal
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Dict
 
 from flask import Flask
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -144,61 +145,240 @@ class HomeForecast:
         )
         
     async def update_cycle(self):
-        """Main update cycle"""
+        """Main update cycle with robust error handling"""
+        cycle_status = {
+            'start_time': datetime.now(),
+            'steps_completed': [],
+            'steps_failed': [],
+            'data_quality_issues': [],
+            'total_success': False
+        }
+        
         try:
             logger.info("=" * 60)
             logger.info("🔄 STARTING UPDATE CYCLE")
             logger.info("=" * 60)
             
-            # Collect current sensor data
+            # Step 1: Collect current sensor data (critical)
             logger.info("📊 Step 1: Collecting sensor data...")
-            sensor_data = await self.ha_client.get_sensor_data()
-            logger.info(f"✅ Sensor data collected: {sensor_data}")
+            try:
+                sensor_data = await self.ha_client.get_sensor_data()
+                
+                # Evaluate data quality
+                quality_issues = sensor_data.get('data_quality', {})
+                if quality_issues.get('missing_sensors') or quality_issues.get('failed_sensors'):
+                    cycle_status['data_quality_issues'].extend([
+                        f"Missing sensors: {quality_issues.get('missing_sensors', [])}",
+                        f"Failed sensors: {quality_issues.get('failed_sensors', [])}"
+                    ])
+                    logger.warning(f"⚠️ Sensor data quality issues detected")
+                
+                self.last_sensor_data = sensor_data
+                cycle_status['steps_completed'].append('sensor_data_collection')
+                logger.info(f"✅ Sensor data collected with {len(quality_issues.get('warnings', []))} warnings")
+                
+            except Exception as e:
+                logger.error(f"❌ Critical failure collecting sensor data: {e}")
+                cycle_status['steps_failed'].append(f'sensor_data_collection: {str(e)}')
+                # Cannot continue without sensor data
+                await self._publish_system_health(cycle_status)
+                return
             
-            # Store for API access
-            self.last_sensor_data = sensor_data
-            
-            # Get weather forecast
+            # Step 2: Get weather forecast (important but not critical)
             logger.info("🌤️ Step 2: Getting weather forecast...")
-            weather_forecast = await self.ha_client.get_weather_forecast()
-            logger.info(f"✅ Weather forecast retrieved with keys: {list(weather_forecast.keys())}")
+            weather_forecast = None
+            try:
+                weather_forecast = await self.ha_client.get_weather_forecast()
+                
+                # Check weather data quality
+                weather_quality = weather_forecast.get('data_quality', {})
+                if weather_quality.get('issues'):
+                    cycle_status['data_quality_issues'].extend(
+                        [f"Weather: {issue}" for issue in weather_quality['issues']]
+                    )
+                    
+                cycle_status['steps_completed'].append('weather_forecast')
+                logger.info(f"✅ Weather forecast retrieved from {weather_quality.get('source', 'unknown')}")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Weather forecast failed, using fallback: {e}")
+                cycle_status['steps_failed'].append(f'weather_forecast: {str(e)}')
+                # Continue with fallback weather data
+                weather_forecast = {
+                    'hourly_forecast': [],
+                    'current_outdoor': {'temperature': sensor_data.get('indoor_temp', 70), 'humidity': 50},
+                    'data_quality': {'source': 'fallback', 'issues': ['Weather API unavailable']}
+                }
             
-            # Store current data
+            # Step 3: Store measurement data (important for learning)
             logger.info("💾 Step 3: Storing measurement data...")
-            await self.data_store.store_measurement(sensor_data)
-            logger.info("✅ Measurement data stored")
+            try:
+                await self.data_store.store_measurement(sensor_data)
+                cycle_status['steps_completed'].append('data_storage')
+                logger.info("✅ Measurement data stored")
+            except Exception as e:
+                logger.warning(f"⚠️ Data storage failed: {e}")
+                cycle_status['steps_failed'].append(f'data_storage: {str(e)}')
+                # Continue without storing (affects learning but not immediate operation)
             
-            # Update thermal model
+            # Step 4: Update thermal model (critical for forecasting)
             logger.info("🏠 Step 4: Updating thermal model...")
-            await self.thermal_model.update(sensor_data)
-            logger.info("✅ Thermal model updated")
+            try:
+                await self.thermal_model.update(sensor_data)
+                cycle_status['steps_completed'].append('thermal_model_update')
+                logger.info("✅ Thermal model updated")
+            except Exception as e:
+                logger.error(f"❌ Thermal model update failed: {e}")
+                cycle_status['steps_failed'].append(f'thermal_model_update: {str(e)}')
+                # Continue with existing model state
             
-            # Generate forecast
+            # Step 5: Generate forecast (critical for system function)
             logger.info("🔮 Step 5: Generating forecast...")
-            forecast_result = await self.forecast_engine.generate_forecast(
-                sensor_data,
-                weather_forecast,
-                getattr(self, 'timezone', 'UTC')
-            )
-            logger.info(f"✅ Forecast generated with keys: {list(forecast_result.keys())}")
+            forecast_result = None
+            try:
+                forecast_result = await self.forecast_engine.generate_forecast(
+                    sensor_data,
+                    weather_forecast,
+                    getattr(self, 'timezone', 'UTC')
+                )
+                cycle_status['steps_completed'].append('forecast_generation')
+                logger.info(f"✅ Forecast generated with keys: {list(forecast_result.keys())}")
+            except Exception as e:
+                logger.error(f"❌ Forecast generation failed: {e}")
+                cycle_status['steps_failed'].append(f'forecast_generation: {str(e)}')
+                # Use simplified forecast as fallback
+                forecast_result = self._generate_simple_forecast(sensor_data, weather_forecast)
+                logger.warning("Using simplified fallback forecast")
             
-            # Analyze comfort and generate recommendations
+            # Step 6: Analyze comfort (important for recommendations)
             logger.info("🏡 Step 6: Analyzing comfort...")
-            comfort_analysis = await self.comfort_analyzer.analyze(
-                forecast_result
-            )
-            logger.info(f"✅ Comfort analysis completed: {comfort_analysis.get('recommended_mode', 'N/A')} mode recommended")
+            comfort_analysis = None
+            try:
+                comfort_analysis = await self.comfort_analyzer.analyze(forecast_result)
+                cycle_status['steps_completed'].append('comfort_analysis')
+                logger.info(f"✅ Comfort analysis completed: {comfort_analysis.get('recommended_mode', 'N/A')} mode recommended")
+            except Exception as e:
+                logger.warning(f"⚠️ Comfort analysis failed: {e}")
+                cycle_status['steps_failed'].append(f'comfort_analysis: {str(e)}')
+                # Use safe defaults
+                comfort_analysis = {
+                    'recommended_mode': 'off',
+                    'confidence': 0.0,
+                    'reasoning': 'Analysis failed - using safe default'
+                }
             
-            # Publish results to Home Assistant
+            # Step 7: Publish results (important for HA integration)
             logger.info("📡 Step 7: Publishing results to Home Assistant...")
-            await self.publish_results(forecast_result, comfort_analysis)
-            logger.info("✅ Results published to Home Assistant")
+            try:
+                await self.publish_results(forecast_result, comfort_analysis)
+                cycle_status['steps_completed'].append('result_publication')
+                logger.info("✅ Results published to Home Assistant")
+            except Exception as e:
+                logger.warning(f"⚠️ Publishing results failed: {e}")
+                cycle_status['steps_failed'].append(f'result_publication: {str(e)}')
             
-            logger.info("🎉 UPDATE CYCLE COMPLETE")
+            # Determine overall success
+            critical_steps = ['sensor_data_collection', 'forecast_generation']
+            critical_failures = [step for step in cycle_status['steps_failed'] 
+                               if any(critical in step for critical in critical_steps)]
+            
+            cycle_status['total_success'] = len(critical_failures) == 0
+            
+            if cycle_status['total_success']:
+                logger.info("🎉 UPDATE CYCLE COMPLETE - All critical steps successful")
+            else:
+                logger.warning(f"⚠️ UPDATE CYCLE COMPLETE with issues - Critical failures: {len(critical_failures)}")
+            
+            # Publish system health status
+            await self._publish_system_health(cycle_status)
+            
             logger.info("=" * 60)
             
         except Exception as e:
-            logger.error(f"Error in update cycle: {e}", exc_info=True)
+            logger.error(f"❌ Unexpected error in update cycle: {e}", exc_info=True)
+            cycle_status['steps_failed'].append(f'unexpected_error: {str(e)}')
+            cycle_status['total_success'] = False
+            await self._publish_system_health(cycle_status)
+
+    def _generate_simple_forecast(self, sensor_data: Dict, weather_forecast: Dict) -> Dict:
+        """Generate a simple fallback forecast when the main engine fails"""
+        logger.info("Generating simple fallback forecast")
+        
+        current_temp = sensor_data.get('indoor_temp', 70.0)
+        outdoor_temp = weather_forecast.get('current_outdoor', {}).get('temperature', current_temp)
+        
+        # Simple prediction: indoor temperature will slowly drift toward outdoor temperature
+        temp_diff = outdoor_temp - current_temp
+        drift_rate = temp_diff * 0.1  # 10% of difference per hour
+        
+        return {
+            'initial_conditions': {
+                'indoor_temp': current_temp,
+                'outdoor_temp': outdoor_temp,
+                'hvac_state': sensor_data.get('hvac_state', 'off')
+            },
+            'hourly_predictions': [{
+                'hour': i,
+                'temperature': current_temp + (drift_rate * i),
+                'confidence': 0.3  # Low confidence for fallback
+            } for i in range(1, 13)],
+            'forecast_type': 'simple_fallback'
+        }
+
+    async def _publish_system_health(self, cycle_status: Dict):
+        """Publish system health and data quality metrics to Home Assistant"""
+        try:
+            # Calculate cycle success rate
+            total_steps = len(cycle_status['steps_completed']) + len(cycle_status['steps_failed'])
+            success_rate = (len(cycle_status['steps_completed']) / total_steps * 100) if total_steps > 0 else 0
+            
+            # Overall system health score
+            health_score = success_rate
+            if cycle_status['data_quality_issues']:
+                health_score -= len(cycle_status['data_quality_issues']) * 5  # Deduct 5% per issue
+            health_score = max(0, min(100, health_score))
+            
+            # Publish health metrics
+            await self.ha_client.update_sensor(
+                'homeforecast.system_health',
+                round(health_score),
+                unit='%',
+                friendly_name='HomeForecast System Health'
+            )
+            
+            await self.ha_client.update_sensor(
+                'homeforecast.cycle_success_rate',
+                round(success_rate, 1),
+                unit='%',
+                friendly_name='HomeForecast Cycle Success Rate'
+            )
+            
+            # Data quality summary
+            quality_summary = "Good"
+            if cycle_status['data_quality_issues']:
+                if len(cycle_status['data_quality_issues']) >= 3:
+                    quality_summary = "Poor"
+                else:
+                    quality_summary = "Fair"
+                    
+            await self.ha_client.update_sensor(
+                'homeforecast.data_quality',
+                quality_summary,
+                friendly_name='HomeForecast Data Quality'
+            )
+            
+            # Last successful update time
+            if cycle_status['total_success']:
+                await self.ha_client.update_sensor(
+                    'homeforecast.last_successful_update',
+                    cycle_status['start_time'].isoformat(),
+                    friendly_name='HomeForecast Last Successful Update'
+                )
+                
+            logger.debug(f"System health published: {health_score}% health, {success_rate}% success rate")
+            
+        except Exception as e:
+            logger.warning(f"Failed to publish system health metrics: {e}")
             
     async def publish_results(self, forecast_result, comfort_analysis):
         """Publish results as Home Assistant sensors"""
