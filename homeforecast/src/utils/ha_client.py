@@ -916,17 +916,28 @@ class HomeAssistantClient:
     def cache_current_weather_data(self, weather_data: Dict):
         """Cache current weather data for future historical reference"""
         try:
+            # Validate weather_data is a dictionary
+            if not isinstance(weather_data, dict):
+                logger.debug(f"Skipping cache - weather_data is not a dict: {type(weather_data)}")
+                return
+            
             # This method can be called to cache current AccuWeather data
             # for use as "historical" data in future requests
             if not hasattr(self, '_weather_cache'):
                 self._weather_cache = []
             
+            # Validate current_outdoor exists and is a dict
+            current_outdoor = weather_data.get('current_outdoor', {})
+            if not isinstance(current_outdoor, dict):
+                logger.debug(f"Skipping cache - current_outdoor is not a dict: {type(current_outdoor)}")
+                return
+            
             # Add current conditions to cache with timestamp
             cache_entry = {
                 'timestamp': datetime.now(),
-                'outdoor_temp': weather_data.get('current_outdoor', {}).get('temperature'),
-                'outdoor_humidity': weather_data.get('current_outdoor', {}).get('humidity'),
-                'solar_irradiance': weather_data.get('current_outdoor', {}).get('solar_irradiance', 0),
+                'outdoor_temp': current_outdoor.get('temperature'),
+                'outdoor_humidity': current_outdoor.get('humidity'),
+                'solar_irradiance': current_outdoor.get('solar_irradiance', 0),
                 'source': 'accuweather_cached'
             }
             

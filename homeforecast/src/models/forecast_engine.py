@@ -65,15 +65,43 @@ class ForecastEngine:
             historical_weather = weather_forecast.get('historical_weather', [])
             logger.info(f"Historical weather data points: {len(historical_weather)}")
             
-            # Perform trend analysis
+            # Perform trend analysis using available data sources
             trend_analysis = None
+            
+            # Combine historical and forecast data for better trend analysis
+            trend_data = []
+            
+            # Add valid historical weather points
             if historical_weather:
+                for point in historical_weather[-6:]:  # Use recent historical data
+                    if isinstance(point, dict) and 'timestamp' in point and 'temperature' in point:
+                        try:
+                            temp = float(point['temperature'])
+                            if -50 <= temp <= 150:  # Reasonable bounds
+                                trend_data.append(point)
+                        except (ValueError, TypeError):
+                            continue
+            
+            # Add AccuWeather forecast data for forward-looking trend
+            if 'hourly_forecast' in weather_forecast and weather_forecast['hourly_forecast']:
+                logger.info("Including AccuWeather forecast data in trend analysis")
+                for forecast_point in weather_forecast['hourly_forecast'][:6]:  # Next 6 hours
+                    if isinstance(forecast_point, dict) and 'timestamp' in forecast_point and 'temperature' in forecast_point:
+                        try:
+                            temp = float(forecast_point['temperature'])
+                            if -50 <= temp <= 150:  # Reasonable bounds
+                                trend_data.append(forecast_point)
+                        except (ValueError, TypeError):
+                            continue
+            
+            if trend_data:
                 trend_analysis = self.thermal_model.analyze_temperature_trends(
-                    historical_weather, current_data
+                    trend_data, current_data
                 )
-                logger.info(f"✅ Trend analysis complete - Outdoor trend: {trend_analysis['outdoor_trend']['rate_per_hour']:+.2f}°F/hr")
+                logger.info(f"✅ Trend analysis complete ({len(trend_data)} points) - Outdoor trend: {trend_analysis['outdoor_trend']['rate_per_hour']:+.2f}°F/hr")
             else:
-                logger.warning("⚠️ No historical data available - trend analysis limited")
+                logger.warning("⚠️ No valid weather data available - using fallback trend analysis")
+                trend_analysis = self.thermal_model._get_fallback_trend_analysis()
             
             if 'current_outdoor' in weather_forecast:
                 current_outdoor = weather_forecast['current_outdoor']
@@ -330,15 +358,29 @@ class ForecastEngine:
                 outdoor['solar_irradiance']
             )
             
-            # Update temperature
+            # Update temperature with guardrails
             dt_hours = self.time_step_minutes / 60.0
-            new_temp = state['indoor_temp'] + dT_dt * dt_hours
+            temp_change = dT_dt * dt_hours
             
-            # Update humidity (simplified - tends toward outdoor)
+            # Limit temperature change rate to reasonable bounds (max 10°F per hour)
+            max_temp_change = 10.0 * dt_hours
+            if abs(temp_change) > max_temp_change:
+                temp_change = max_temp_change if temp_change > 0 else -max_temp_change
+                logger.debug(f"Limited temperature change to {temp_change:.2f}°F (was {dT_dt * dt_hours:.2f}°F)")
+            
+            new_temp = state['indoor_temp'] + temp_change
+            
+            # Apply absolute temperature bounds
+            new_temp = max(0, min(150, new_temp))  # 0°F to 150°F bounds
+            
+            # Update humidity (simplified - tends toward outdoor) with bounds
             humidity_rate = 0.1  # 10% approach per hour
             new_humidity = state['indoor_humidity'] + (
                 outdoor['outdoor_humidity'] - state['indoor_humidity']
             ) * humidity_rate * dt_hours
+            
+            # Apply humidity bounds
+            new_humidity = max(5, min(95, new_humidity))  # 5% to 95% bounds
             
             # Update state
             state['indoor_temp'] = new_temp

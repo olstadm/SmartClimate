@@ -253,20 +253,32 @@ class ThermalModel:
             Dict with trend analysis results
         """
         try:
-            logger.info("📈 Analyzing temperature trends from historical data...")
+            logger.info("📈 Analyzing temperature trends from available data...")
             
-            if not historical_weather or len(historical_weather) < 2:
-                logger.warning("⚠️ Insufficient historical data for trend analysis")
-                return self._get_fallback_trend_analysis()
-            
-            # Extract temperature time series
+            # Try to use recent historical data for trend analysis
             timestamps = []
             outdoor_temps = []
             
-            for point in historical_weather:
-                if 'timestamp' in point and 'temperature' in point:
-                    timestamps.append(point['timestamp'])
-                    outdoor_temps.append(point['temperature'])
+            if historical_weather and len(historical_weather) >= 2:
+                logger.info("Using historical weather data for trend analysis")
+                for point in historical_weather[-12:]:  # Use last 12 points only
+                    if isinstance(point, dict) and 'timestamp' in point and 'temperature' in point:
+                        try:
+                            temp = float(point['temperature'])
+                            if -50 <= temp <= 150:  # Reasonable bounds
+                                timestamps.append(point['timestamp'])
+                                outdoor_temps.append(temp)
+                        except (ValueError, TypeError):
+                            continue
+            
+            # If insufficient historical data, check if we have current conditions for basic trend
+            if len(outdoor_temps) < 2:
+                logger.info("Insufficient historical data - using current conditions for basic trend")
+                current_temp = current_conditions.get('outdoor_temp')
+                if current_temp and isinstance(current_temp, (int, float)) and -50 <= current_temp <= 150:
+                    now = datetime.now()
+                    timestamps = [now - timedelta(hours=1), now]  # Create 1-hour baseline
+                    outdoor_temps = [current_temp, current_temp]  # Flat trend assumption
             
             if len(outdoor_temps) < 2:
                 logger.warning("⚠️ Insufficient temperature data points")
@@ -469,6 +481,16 @@ class ThermalModel:
                 'base_prediction': dT_dt
             })
             dT_dt += correction
+        
+        # Apply reasonable bounds to temperature change rate
+        # Maximum realistic HVAC heating/cooling: ±15°F/hour
+        # Maximum realistic natural drift: ±5°F/hour
+        max_rate = 20.0  # °F/hour absolute maximum
+        dT_dt = max(-max_rate, min(max_rate, dT_dt))
+        
+        # Log extreme values for debugging
+        if abs(dT_dt) > 10.0:
+            logger.debug(f"High temperature change rate: {dT_dt:.2f}°F/hr (T_in: {t_in:.1f}°F, T_out: {t_out:.1f}°F, HVAC: {hvac_state})")
             
         return dT_dt
         
