@@ -600,13 +600,27 @@ class ForecastEngine:
         if historical_weather:
             logger.info(f"Adding {len(historical_weather)} historical weather points")
             for hist_point in historical_weather:
-                series.append({
-                    'timestamp': hist_point['timestamp'],
-                    'outdoor_temp': hist_point['temperature'],
-                    'outdoor_humidity': hist_point.get('humidity', 50.0),
-                    'solar_irradiance': hist_point.get('solar_irradiance', 0.0),
-                    'data_type': 'historical'
-                })
+                try:
+                    # Ensure hist_point is a dictionary
+                    if not isinstance(hist_point, dict):
+                        logger.warning(f"Skipping invalid historical weather point (not a dict): {type(hist_point)}")
+                        continue
+                    
+                    # Ensure required fields exist
+                    if 'timestamp' not in hist_point or 'temperature' not in hist_point:
+                        logger.warning(f"Skipping historical weather point missing required fields: {hist_point}")
+                        continue
+                    
+                    series.append({
+                        'timestamp': hist_point['timestamp'],
+                        'outdoor_temp': hist_point['temperature'],
+                        'outdoor_humidity': hist_point.get('humidity', 50.0),
+                        'solar_irradiance': hist_point.get('solar_irradiance', 0.0),
+                        'data_type': 'historical'
+                    })
+                except Exception as e:
+                    logger.warning(f"Error processing historical weather point: {e}")
+                    continue
         
         # Add current point
         current_outdoor_temp = current_data.get('outdoor_temp')

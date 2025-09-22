@@ -50,6 +50,41 @@ class LocalTimeFormatter(logging.Formatter):
 # Create formatter
 formatter = LocalTimeFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
+# Global function to update logging timezone
+def update_logging_timezone(timezone_name):
+    """Update the logging formatter to use Home Assistant timezone"""
+    global formatter
+    try:
+        import pytz
+        # Create new formatter with HA timezone support
+        class HATimeFormatter(LocalTimeFormatter):
+            def formatTime(self, record, datefmt=None):
+                try:
+                    # Use Home Assistant timezone
+                    utc_time = datetime.fromtimestamp(record.created, tz=pytz.UTC)
+                    ha_timezone = pytz.timezone(timezone_name)
+                    local_time = utc_time.astimezone(ha_timezone)
+                    
+                    # Format as h:mm AM/PM (handle leading zero differences between platforms)
+                    if platform.system() == 'Windows':
+                        formatted_time = local_time.strftime('%#I:%M %p')
+                    else:
+                        formatted_time = local_time.strftime('%-I:%M %p')
+                    return formatted_time
+                except Exception:
+                    # Fallback to system local time
+                    return super().formatTime(record, datefmt)
+        
+        # Update all existing handlers to use the new timezone-aware formatter
+        new_formatter = HATimeFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers:
+            handler.setFormatter(new_formatter)
+        
+        logger.info(f"📅 Updated logging timezone to Home Assistant timezone: {timezone_name}")
+    except Exception as e:
+        logger.warning(f"Could not update logging timezone to {timezone_name}: {e}")
+
 # Setup handlers with custom formatter
 file_handler = logging.FileHandler('/var/log/homeforecast/homeforecast.log')
 file_handler.setFormatter(formatter)
@@ -100,6 +135,9 @@ class HomeForecast:
         # Get and store timezone from Home Assistant
         self.timezone = self.ha_client.get_timezone()
         logger.info(f"🌍 Using timezone: {self.timezone}")
+        
+        # Update logging to use Home Assistant timezone
+        update_logging_timezone(self.timezone)
         
         # Initialize thermal model
         self.thermal_model = ThermalModel(self.config, self.data_store)
