@@ -35,10 +35,26 @@ def create_app(homeforecast_instance):
     def get_status():
         """Get current addon status"""
         try:
+            # Get current sensor data for display
+            current_data = {}
+            try:
+                # This will be synchronous, so we need to be careful about blocking
+                # For now, we'll just get the model state which should have the latest data
+                model_params = app.homeforecast.thermal_model.get_parameters()
+                current_data = {
+                    'indoor_temp': getattr(app.homeforecast.thermal_model, 'current_indoor_temp', None),
+                    'outdoor_temp': getattr(app.homeforecast.thermal_model, 'current_outdoor_temp', None),
+                    'hvac_state': getattr(app.homeforecast.thermal_model, 'current_hvac_state', 'unknown')
+                }
+            except Exception as e:
+                logger.warning(f"Could not get current sensor data: {e}")
+                current_data = {}
+            
             return jsonify({
                 'status': 'running',
-                'version': '1.0.0',
+                'version': '1.0.9',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
+                'current_data': current_data,
                 'model_parameters': app.homeforecast.thermal_model.get_parameters(),
                 'config': {
                     'comfort_min': app.homeforecast.config.get('comfort_min_temp'),
@@ -194,5 +210,38 @@ def create_app(homeforecast_instance):
     def send_static(path):
         """Serve static files"""
         return send_from_directory('static', path)
+        
+    @app.route('/api/logs')
+    def get_logs():
+        """Get recent log entries"""
+        try:
+            log_file = '/proc/1/fd/1'  # Docker container stdout
+            if not os.path.exists(log_file):
+                # Fallback to supervisor logs
+                log_file = '/proc/self/fd/1'
+            
+            # Read last 100 lines of logs
+            try:
+                with open(log_file, 'r') as f:
+                    lines = f.readlines()
+                    recent_lines = lines[-100:] if len(lines) > 100 else lines
+                    return jsonify({
+                        'logs': ''.join(recent_lines),
+                        'lines': recent_lines
+                    })
+            except:
+                # If can't read logs, return a helpful message
+                return jsonify({
+                    'logs': 'Log file not accessible. Check Home Assistant Supervisor logs for HomeForecast addon.',
+                    'lines': []
+                })
+                
+        except Exception as e:
+            return jsonify({'error': f'Error reading logs: {str(e)}'}), 500
+    
+    @app.route('/logs')
+    def logs_page():
+        """Logs viewer page"""
+        return render_template('logs.html')
         
     return app

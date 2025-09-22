@@ -90,6 +90,13 @@ class ThermalModel:
         self.last_temp_in = None
         self.parameter_history = []
         
+        # Current sensor readings for API access
+        self.current_indoor_temp = None
+        self.current_outdoor_temp = None
+        self.current_hvac_state = 'unknown'
+        self.current_indoor_humidity = None
+        self.current_outdoor_humidity = None
+        
         # ML correction model (optional)
         self.ml_corrector = None
         self.ml_enabled = config.get('enable_ml_correction', False)
@@ -162,6 +169,13 @@ class ThermalModel:
             # Update state
             self.last_update = current_time
             self.last_temp_in = t_in
+            
+            # Store current sensor readings for API access
+            self.current_indoor_temp = t_in
+            self.current_outdoor_temp = t_out  
+            self.current_hvac_state = hvac_state
+            self.current_indoor_humidity = h_in
+            self.current_outdoor_humidity = h_out
             
             return self.get_parameters()
             

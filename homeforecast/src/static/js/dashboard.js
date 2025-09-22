@@ -53,6 +53,7 @@ class HomeForecastDashboard {
             ]);
 
             // Update UI with fetched data
+            console.log('API responses:', { status, forecast, comfort, parameters, statistics });
             this.updateStatus(status);
             this.updateForecast(forecast);
             this.updateComfort(comfort);
@@ -111,12 +112,22 @@ class HomeForecastDashboard {
         if (lastUpdateEl && status.last_update) {
             const date = new Date(status.last_update);
             lastUpdateEl.textContent = this.formatRelativeTime(date);
+        } else if (lastUpdateEl) {
+            lastUpdateEl.textContent = 'just now';
+        }
+
+        // Update current temperature from current sensor data
+        const currentTempEl = document.getElementById('currentTemp');
+        if (currentTempEl && status.current_data && status.current_data.indoor_temp) {
+            currentTempEl.textContent = status.current_data.indoor_temp.toFixed(1) + '°F';
+        } else if (currentTempEl) {
+            currentTempEl.textContent = '-';
         }
 
         // Update configuration display
         if (status.config) {
-            document.getElementById('comfortMin').textContent = status.config.comfort_min + '°C';
-            document.getElementById('comfortMax').textContent = status.config.comfort_max + '°C';
+            document.getElementById('comfortMin').textContent = status.config.comfort_min + '°F';
+            document.getElementById('comfortMax').textContent = status.config.comfort_max + '°F';
             document.getElementById('mlEnabled').textContent = status.config.ml_enabled ? 'Enabled' : 'Disabled';
         }
     }
@@ -135,7 +146,7 @@ class HomeForecastDashboard {
         // Update current temperature
         if (data.initial_conditions) {
             document.getElementById('currentTemp').textContent = 
-                data.initial_conditions.indoor_temp.toFixed(1) + '°C';
+                data.initial_conditions.indoor_temp.toFixed(1) + '°F';
         }
     }
 
