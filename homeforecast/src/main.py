@@ -340,14 +340,14 @@ class HomeForecast:
             
             # Publish health metrics
             await self.ha_client.update_sensor(
-                'homeforecast.system_health',
+                'sensor.homeforecast_system_health',
                 round(health_score),
                 unit='%',
                 friendly_name='HomeForecast System Health'
             )
             
             await self.ha_client.update_sensor(
-                'homeforecast.cycle_success_rate',
+                'sensor.homeforecast_cycle_success_rate',
                 round(success_rate, 1),
                 unit='%',
                 friendly_name='HomeForecast Cycle Success Rate'
@@ -362,7 +362,7 @@ class HomeForecast:
                     quality_summary = "Fair"
                     
             await self.ha_client.update_sensor(
-                'homeforecast.data_quality',
+                'sensor.homeforecast_data_quality',
                 quality_summary,
                 friendly_name='HomeForecast Data Quality'
             )
@@ -370,7 +370,7 @@ class HomeForecast:
             # Last successful update time
             if cycle_status['total_success']:
                 await self.ha_client.update_sensor(
-                    'homeforecast.last_successful_update',
+                    'sensor.homeforecast_last_successful_update',
                     cycle_status['start_time'].isoformat(),
                     friendly_name='HomeForecast Last Successful Update'
                 )
@@ -383,81 +383,154 @@ class HomeForecast:
     async def publish_results(self, forecast_result, comfort_analysis):
         """Publish results as Home Assistant sensors"""
         try:
-            logger.info("Publishing thermal model parameters...")
+            logger.info("📡 Publishing thermal model parameters...")
+            
+            # Validate input data
+            if not forecast_result:
+                logger.warning("No forecast result to publish")
+                return
+            if not comfort_analysis:
+                logger.warning("No comfort analysis to publish")
+                return
+                
+            logger.info(f"Forecast result keys: {list(forecast_result.keys())}")
+            logger.info(f"Comfort analysis keys: {list(comfort_analysis.keys())}")
+            
             # Thermal model parameters
             params = self.thermal_model.get_parameters()
-            logger.info(f"Thermal parameters: {params}")
+            logger.info(f"Publishing thermal parameters: {params}")
             
             await self.ha_client.update_sensor(
-                'homeforecast.thermal_time_constant',
-                params['time_constant'],
+                'sensor.homeforecast_thermal_time_constant',
+                round(params.get('time_constant', 0), 2),
                 unit='hours',
                 friendly_name='Thermal Time Constant'
             )
             await self.ha_client.update_sensor(
-                'homeforecast.heating_rate',
-                params['heating_rate'],
+                'sensor.homeforecast_heating_rate',
+                round(params.get('heating_rate', 0), 2),
                 unit='°F/hour',
                 friendly_name='Heating Rate'
             )
             await self.ha_client.update_sensor(
-                'homeforecast.cooling_rate',
-                params['cooling_rate'],
+                'sensor.homeforecast_cooling_rate',
+                round(params.get('cooling_rate', 0), 2),
                 unit='°F/hour',
                 friendly_name='Cooling Rate'
             )
             
-            # Current forecast
-            await self.ha_client.update_sensor(
-                'homeforecast.forecast_12h',
-                forecast_result['indoor_forecast'][-1],
-                unit='°F',
-                friendly_name='12 Hour Temperature Forecast'
-            )
+            # 12-hour forecast temperature
+            logger.info("📡 Publishing forecast data...")
+            forecast_12h = None
+            try:
+                # Try different possible keys for the forecast
+                if 'indoor_forecast' in forecast_result and forecast_result['indoor_forecast']:
+                    forecast_12h = forecast_result['indoor_forecast'][-1]
+                    logger.info(f"Using indoor_forecast[-1]: {forecast_12h}°F")
+                elif 'controlled_trajectory' in forecast_result and forecast_result['controlled_trajectory']:
+                    last_point = forecast_result['controlled_trajectory'][-1]
+                    forecast_12h = last_point.get('indoor_temp')
+                    logger.info(f"Using controlled_trajectory[-1]: {forecast_12h}°F")
+                elif 'hourly_predictions' in forecast_result and forecast_result['hourly_predictions']:
+                    last_prediction = forecast_result['hourly_predictions'][-1]
+                    forecast_12h = last_prediction.get('temperature')
+                    logger.info(f"Using hourly_predictions[-1]: {forecast_12h}°F")
+                    
+                if forecast_12h is not None:
+                    await self.ha_client.update_sensor(
+                        'sensor.homeforecast_forecast_12h',
+                        round(float(forecast_12h), 1),
+                        unit='°F',
+                        friendly_name='12 Hour Temperature Forecast'
+                    )
+                else:
+                    logger.warning("Could not find 12-hour forecast value to publish")
+                    
+            except Exception as e:
+                logger.error(f"Error publishing forecast: {e}")
             
-            # Comfort analysis
-            await self.ha_client.update_sensor(
-                'homeforecast.time_to_upper_limit',
-                comfort_analysis['time_to_upper'],
-                unit='minutes',
-                friendly_name='Time to Upper Comfort Limit'
-            )
-            await self.ha_client.update_sensor(
-                'homeforecast.time_to_lower_limit',
-                comfort_analysis['time_to_lower'],
-                unit='minutes',
-                friendly_name='Time to Lower Comfort Limit'
-            )
-            await self.ha_client.update_sensor(
-                'homeforecast.recommended_mode',
-                comfort_analysis['recommended_mode'],
-                friendly_name='Recommended HVAC Mode'
-            )
-            await self.ha_client.update_sensor(
-                'homeforecast.smart_hvac_enabled',
-                comfort_analysis.get('smart_hvac_enabled', False),
-                friendly_name='Smart HVAC Control Enabled'
-            )
-            
-            # HVAC recommendations
-            if comfort_analysis['hvac_start_time']:
+            # Comfort analysis sensors
+            logger.info("📡 Publishing comfort analysis...")
+            try:
+                # Time to upper comfort limit
+                time_to_upper = comfort_analysis.get('time_to_upper')
+                if time_to_upper is not None:
+                    await self.ha_client.update_sensor(
+                        'sensor.homeforecast_time_to_upper_limit',
+                        round(float(time_to_upper), 1) if time_to_upper != float('inf') else 9999,
+                        unit='minutes',
+                        friendly_name='Time to Upper Comfort Limit'
+                    )
+                
+                # Time to lower comfort limit
+                time_to_lower = comfort_analysis.get('time_to_lower')
+                if time_to_lower is not None:
+                    await self.ha_client.update_sensor(
+                        'sensor.homeforecast_time_to_lower_limit',
+                        round(float(time_to_lower), 1) if time_to_lower != float('inf') else 9999,
+                        unit='minutes',
+                        friendly_name='Time to Lower Comfort Limit'
+                    )
+                
+                # Recommended HVAC mode
+                recommended_mode = comfort_analysis.get('recommended_mode', 'off')
                 await self.ha_client.update_sensor(
-                    'homeforecast.hvac_start_time',
-                    comfort_analysis['hvac_start_time'].isoformat(),
-                    friendly_name='Recommended HVAC Start Time'
-                )
-            if comfort_analysis['hvac_stop_time']:
-                await self.ha_client.update_sensor(
-                    'homeforecast.hvac_stop_time',
-                    comfort_analysis['hvac_stop_time'].isoformat(),
-                    friendly_name='Recommended HVAC Stop Time'
+                    'sensor.homeforecast_recommended_mode',
+                    str(recommended_mode),
+                    friendly_name='Recommended HVAC Mode'
                 )
                 
+                # Smart HVAC enabled status
+                smart_enabled = comfort_analysis.get('smart_hvac_enabled', False)
+                await self.ha_client.update_sensor(
+                    'sensor.homeforecast_smart_hvac_enabled',
+                    bool(smart_enabled),
+                    friendly_name='Smart HVAC Control Enabled'
+                )
+                
+                logger.info(f"Published comfort analysis: mode={recommended_mode}, upper={time_to_upper}min, lower={time_to_lower}min")
+                
+            except Exception as e:
+                logger.error(f"Error publishing comfort analysis: {e}")
+            
+            # HVAC timing recommendations
+            logger.info("📡 Publishing HVAC timing recommendations...")
+            try:
+                hvac_start_time = comfort_analysis.get('hvac_start_time')
+                if hvac_start_time is not None:
+                    start_time_str = hvac_start_time.isoformat() if hasattr(hvac_start_time, 'isoformat') else str(hvac_start_time)
+                    await self.ha_client.update_sensor(
+                        'sensor.homeforecast_hvac_start_time',
+                        start_time_str,
+                        friendly_name='Recommended HVAC Start Time'
+                    )
+                    logger.info(f"Published HVAC start time: {start_time_str}")
+                
+                hvac_stop_time = comfort_analysis.get('hvac_stop_time')
+                if hvac_stop_time is not None:
+                    stop_time_str = hvac_stop_time.isoformat() if hasattr(hvac_stop_time, 'isoformat') else str(hvac_stop_time)
+                    await self.ha_client.update_sensor(
+                        'sensor.homeforecast_hvac_stop_time',
+                        stop_time_str,
+                        friendly_name='Recommended HVAC Stop Time'
+                    )
+                    logger.info(f"Published HVAC stop time: {stop_time_str}")
+                    
+            except Exception as e:
+                logger.error(f"Error publishing HVAC timing: {e}")
+                
             # Store forecast for visualization
-            await self.data_store.store_forecast(forecast_result)
+            logger.info("📁 Storing forecast data...")
+            try:
+                await self.data_store.store_forecast(forecast_result)
+                logger.info("✅ Forecast data stored successfully")
+            except Exception as e:
+                logger.warning(f"Failed to store forecast data: {e}")
+            
+            logger.info("✅ All sensor data published to Home Assistant")
             
         except Exception as e:
-            logger.error(f"Error publishing results: {e}", exc_info=True)
+            logger.error(f"❌ Error publishing results: {e}", exc_info=True)
             
     async def check_ml_training_readiness(self):
         """Check if ML model is ready to train or needs retraining"""
