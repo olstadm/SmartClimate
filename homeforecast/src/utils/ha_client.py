@@ -103,12 +103,20 @@ class HomeAssistantClient:
                 data['outdoor_humidity'] = None
                 logger.info("No local outdoor humidity sensor - will use AccuWeather data")
                 
-            # Get HVAC state
+            # Get comprehensive thermostat data
             hvac_entity = self.config.get('hvac_entity')
-            logger.info(f"Reading HVAC state from entity: {hvac_entity}")
-            hvac_state = await self._get_climate_state(hvac_entity)
-            data['hvac_state'] = hvac_state
-            logger.info(f"HVAC state: {hvac_state}")
+            logger.info(f"Reading thermostat data from entity: {hvac_entity}")
+            thermostat_data = await self.get_thermostat_data(hvac_entity)
+            
+            # Include thermostat data in sensor data
+            data['hvac_state'] = thermostat_data['hvac_state']
+            data['hvac_mode'] = thermostat_data['hvac_mode']
+            data['hvac_action'] = thermostat_data['hvac_action']
+            data['target_temperature'] = thermostat_data['target_temperature']
+            data['thermostat_data'] = thermostat_data
+            
+            logger.info(f"Thermostat info - State: {data['hvac_state']}, Mode: {data['hvac_mode']}, " +
+                       f"Action: {data['hvac_action']}, Target: {data['target_temperature']}°F")
             
             # Get solar irradiance if available
             solar_entity = self.config.get('solar_irradiance_entity')
@@ -145,8 +153,15 @@ class HomeAssistantClient:
             return None
             
     async def _get_climate_state(self, entity_id: str) -> str:
-        """Get HVAC operating state from climate entity"""
+        """Get HVAC operating state from climate entity (for backward compatibility)"""
+        climate_data = await self.get_thermostat_data(entity_id)
+        return climate_data.get('hvac_action', 'off')
+
+    async def get_thermostat_data(self, entity_id: str) -> Dict:
+        """Get comprehensive thermostat information from climate entity"""
         try:
+            logger.info(f"📡 Collecting thermostat data from entity: {entity_id}")
+            
             async with self.session.get(
                 f"{self.base_url}/states/{entity_id}",
                 headers=self.headers
@@ -155,30 +170,80 @@ class HomeAssistantClient:
                     data = await resp.json()
                     attributes = data.get('attributes', {})
                     
-                    # Check hvac_action first (actual operating state)
-                    hvac_action = attributes.get('hvac_action', '').lower()
-                    if hvac_action in ['heating', 'heat']:
-                        return 'heat'
-                    elif hvac_action in ['cooling', 'cool']:
-                        return 'cool'
-                    elif hvac_action in ['idle', 'off']:
-                        return 'off'
+                    # Extract comprehensive thermostat information
+                    thermostat_data = {
+                        # Current state
+                        'hvac_mode': data.get('state', 'off').lower(),  # off, heat, cool, auto
+                        'hvac_action': attributes.get('hvac_action', 'idle').lower(),  # heating, cooling, idle
                         
-                    # Fallback to state
-                    state = data.get('state', 'off').lower()
-                    if state == 'heat':
-                        return 'heat'
-                    elif state == 'cool':
-                        return 'cool'
+                        # Temperature settings
+                        'current_temperature': attributes.get('current_temperature', 70.0),
+                        'target_temperature': attributes.get('temperature', 72.0),  # setpoint
+                        
+                        # Humidity
+                        'current_humidity': attributes.get('current_humidity', 50.0),
+                        
+                        # Fan settings
+                        'fan_mode': attributes.get('fan_mode', 'auto'),
+                        
+                        # Available modes
+                        'hvac_modes': attributes.get('hvac_modes', ['off', 'heat', 'cool']),
+                        'fan_modes': attributes.get('fan_modes', ['auto', 'on']),
+                        
+                        # Temperature limits
+                        'min_temp': attributes.get('min_temp', 50),
+                        'max_temp': attributes.get('max_temp', 95),
+                        'target_temp_step': attributes.get('target_temp_step', 1),
+                        
+                        # Additional attributes
+                        'friendly_name': attributes.get('friendly_name', 'Thermostat'),
+                        'supported_features': attributes.get('supported_features', 0)
+                    }
+                    
+                    # Normalize hvac_action for our system
+                    hvac_action = thermostat_data['hvac_action']
+                    if hvac_action in ['heating', 'heat']:
+                        thermostat_data['hvac_state'] = 'heat'
+                    elif hvac_action in ['cooling', 'cool']:
+                        thermostat_data['hvac_state'] = 'cool'
+                    elif hvac_action in ['idle', 'off']:
+                        thermostat_data['hvac_state'] = 'off'
                     else:
-                        return 'off'
+                        thermostat_data['hvac_state'] = 'off'
+                    
+                    logger.info(f"🌡️ Thermostat data: Mode={thermostat_data['hvac_mode']}, " +
+                              f"Action={thermostat_data['hvac_action']}, " +
+                              f"Current={thermostat_data['current_temperature']}°F, " +
+                              f"Target={thermostat_data['target_temperature']}°F")
+                    
+                    return thermostat_data
+                    
                 else:
                     logger.warning(f"Failed to get climate state for {entity_id}: {resp.status}")
-                    return 'off'
+                    return self._get_default_thermostat_data()
                     
         except Exception as e:
-            logger.error(f"Error getting climate state: {e}")
-            return 'off'
+            logger.error(f"Error getting thermostat data: {e}")
+            return self._get_default_thermostat_data()
+
+    def _get_default_thermostat_data(self) -> Dict:
+        """Return default thermostat data when unable to connect"""
+        return {
+            'hvac_mode': 'off',
+            'hvac_action': 'idle', 
+            'hvac_state': 'off',
+            'current_temperature': 70.0,
+            'target_temperature': 72.0,
+            'current_humidity': 50.0,
+            'fan_mode': 'auto',
+            'hvac_modes': ['off', 'heat', 'cool'],
+            'fan_modes': ['auto', 'on'],
+            'min_temp': 50,
+            'max_temp': 95,
+            'target_temp_step': 1,
+            'friendly_name': 'Thermostat',
+            'supported_features': 0
+        }
             
     async def get_weather_forecast(self) -> Dict:
         """Get weather forecast from AccuWeather"""

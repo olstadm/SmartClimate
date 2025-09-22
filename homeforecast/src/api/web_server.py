@@ -4,7 +4,7 @@ Provides REST API and web interface for Home Assistant integration
 """
 import logging
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, jsonify, request, render_template, send_from_directory
 from flask_cors import CORS
 import asyncio
@@ -30,6 +30,83 @@ def convert_numpy_types(obj):
     elif HAS_NUMPY and isinstance(obj, np.ndarray):
         return obj.tolist()
     return obj
+
+
+def calculate_climate_insights(current_data, thermostat_data, config, comfort_analyzer=None):
+    """Calculate climate action insights for dashboard"""
+    try:
+        insights = {
+            'recommended_action': 'NONE',
+            'action_off_time': None,
+            'next_action_time': None,
+            'estimated_runtime': None
+        }
+        
+        # Get current conditions
+        current_temp = current_data.get('indoor_temp', 70.0)
+        target_temp = thermostat_data.get('target_temperature', 72.0)
+        hvac_mode = thermostat_data.get('hvac_mode', 'off')
+        hvac_action = thermostat_data.get('hvac_action', 'idle')
+        
+        comfort_min = config.get('comfort_min_temp', 68.0)
+        comfort_max = config.get('comfort_max_temp', 74.0)
+        
+        logger.info(f"Climate insights calculation - Current: {current_temp}°F, Target: {target_temp}°F, " +
+                   f"Mode: {hvac_mode}, Action: {hvac_action}")
+        
+        # Determine recommended action based on current conditions
+        if hvac_mode == 'off':
+            insights['recommended_action'] = 'OFF'
+        elif hvac_action in ['heating', 'heat']:
+            insights['recommended_action'] = 'HEATING'
+            # Estimate when heating will stop (when target temp is reached)
+            if current_temp < target_temp:
+                temp_diff = target_temp - current_temp
+                heating_rate = 3.5  # °F/hour (default estimate)
+                runtime_hours = temp_diff / heating_rate
+                insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
+                insights['action_off_time'] = (datetime.now() + 
+                                             timedelta(hours=runtime_hours)).strftime("%H:%M")
+        elif hvac_action in ['cooling', 'cool']:
+            insights['recommended_action'] = 'COOLING'
+            # Estimate when cooling will stop (when target temp is reached)
+            if current_temp > target_temp:
+                temp_diff = current_temp - target_temp
+                cooling_rate = 4.0  # °F/hour (default estimate)
+                runtime_hours = temp_diff / cooling_rate
+                insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
+                insights['action_off_time'] = (datetime.now() + 
+                                             timedelta(hours=runtime_hours)).strftime("%H:%M")
+        elif hvac_mode == 'heat' and current_temp < comfort_min:
+            insights['recommended_action'] = 'HEAT'
+            # Calculate when to start heating to maintain comfort
+            temp_deficit = comfort_min - current_temp
+            if temp_deficit > 1.0:  # Need heating soon
+                insights['next_action_time'] = "Now"
+            else:
+                insights['next_action_time'] = "15 min"
+        elif hvac_mode == 'cool' and current_temp > comfort_max:
+            insights['recommended_action'] = 'COOL'
+            # Calculate when to start cooling to maintain comfort
+            temp_excess = current_temp - comfort_max
+            if temp_excess > 1.0:  # Need cooling soon
+                insights['next_action_time'] = "Now"
+            else:
+                insights['next_action_time'] = "15 min"
+        else:
+            insights['recommended_action'] = 'MONITOR'
+        
+        logger.info(f"Climate insights result: {insights}")
+        return insights
+        
+    except Exception as e:
+        logger.error(f"Error calculating climate insights: {e}")
+        return {
+            'recommended_action': 'UNKNOWN',
+            'action_off_time': None,
+            'next_action_time': None,
+            'estimated_runtime': None
+        }
 
 
 def create_app(homeforecast_instance):
@@ -103,11 +180,30 @@ def create_app(homeforecast_instance):
                     'hvac_state': 'unknown'
                 }
             
+            # Get thermostat data if available
+            thermostat_data = {}
+            try:
+                if hasattr(app.homeforecast, 'last_sensor_data') and app.homeforecast.last_sensor_data:
+                    thermostat_data = app.homeforecast.last_sensor_data.get('thermostat_data', {})
+                    logger.info(f"Retrieved thermostat data: {thermostat_data}")
+            except Exception as e:
+                logger.warning(f"Could not get thermostat data: {e}")
+
+            # Calculate climate action insights
+            climate_insights = calculate_climate_insights(
+                current_data, 
+                thermostat_data,
+                app.homeforecast.config,
+                app.homeforecast.comfort_analyzer if hasattr(app.homeforecast, 'comfort_analyzer') else None
+            )
+
             response_data = {
                 'status': 'running',
-                'version': '1.1.4',
+                'version': '1.3.0',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'current_data': current_data,
+                'thermostat_data': thermostat_data,
+                'climate_insights': climate_insights,
                 'model_parameters': app.homeforecast.thermal_model.get_parameters(),
                 'config': {
                     'comfort_min': app.homeforecast.config.get('comfort_min_temp'),

@@ -140,6 +140,9 @@ class HomeForecast:
             sensor_data = await self.ha_client.get_sensor_data()
             logger.info(f"✅ Sensor data collected: {sensor_data}")
             
+            # Store for API access
+            self.last_sensor_data = sensor_data
+            
             # Get weather forecast
             logger.info("🌤️ Step 2: Getting weather forecast...")
             weather_forecast = await self.ha_client.get_weather_forecast()

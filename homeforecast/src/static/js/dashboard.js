@@ -169,6 +169,8 @@ class HomeForecastDashboard {
     }
 
     updateStatus(status) {
+        console.log('updateStatus called with:', status);
+        
         // Update status indicator
         const statusEl = document.getElementById('status');
         if (statusEl) {
@@ -195,9 +197,73 @@ class HomeForecastDashboard {
 
         // Update configuration display
         if (status.config) {
-            document.getElementById('comfortMin').textContent = status.config.comfort_min + '°F';
-            document.getElementById('comfortMax').textContent = status.config.comfort_max + '°F';
-            document.getElementById('mlEnabled').textContent = status.config.ml_enabled ? 'Enabled' : 'Disabled';
+            const comfortMinEl = document.getElementById('comfortMin');
+            const comfortMaxEl = document.getElementById('comfortMax');
+            const mlEnabledEl = document.getElementById('mlEnabled');
+            const smartHvacEnabledEl = document.getElementById('smartHvacEnabled');
+            const updateIntervalEl = document.getElementById('updateInterval');
+            
+            if (comfortMinEl) comfortMinEl.textContent = status.config.comfort_min + '°F';
+            if (comfortMaxEl) comfortMaxEl.textContent = status.config.comfort_max + '°F';
+            if (mlEnabledEl) mlEnabledEl.textContent = status.config.ml_enabled ? 'Enabled' : 'Disabled';
+            if (smartHvacEnabledEl) smartHvacEnabledEl.textContent = status.config.smart_hvac_enabled ? 'Enabled' : 'Disabled';
+            if (updateIntervalEl) updateIntervalEl.textContent = status.config.update_interval + ' min';
+        }
+
+        // Update climate action insights
+        if (status.climate_insights) {
+            this.updateClimateInsights(status.climate_insights);
+        }
+
+        // Update thermostat data in Analysis tab
+        if (status.thermostat_data) {
+            this.updateThermostatData(status.thermostat_data);
+        }
+    }
+
+    updateClimateInsights(insights) {
+        console.log('updateClimateInsights called with:', insights);
+        
+        const recommendedActionEl = document.getElementById('recommendedAction');
+        if (recommendedActionEl) {
+            recommendedActionEl.textContent = insights.recommended_action || 'UNKNOWN';
+            // Add CSS class for styling based on action
+            recommendedActionEl.className = 'metric-value large action-status action-' + 
+                                           (insights.recommended_action || 'unknown').toLowerCase();
+        }
+
+        const actionOffTimeEl = document.getElementById('actionOffTime');
+        if (actionOffTimeEl) {
+            actionOffTimeEl.textContent = insights.action_off_time || 'N/A';
+        }
+
+        const nextActionTimeEl = document.getElementById('nextActionTime');
+        if (nextActionTimeEl) {
+            nextActionTimeEl.textContent = insights.next_action_time || 'N/A';
+        }
+
+        const estimatedRuntimeEl = document.getElementById('estimatedRuntime');
+        if (estimatedRuntimeEl) {
+            estimatedRuntimeEl.textContent = insights.estimated_runtime || 'N/A';
+        }
+    }
+
+    updateThermostatData(thermostat_data) {
+        console.log('updateThermostatData called with:', thermostat_data);
+        
+        const currentSetpointEl = document.getElementById('currentSetpoint');
+        if (currentSetpointEl && thermostat_data.target_temperature) {
+            currentSetpointEl.textContent = thermostat_data.target_temperature.toFixed(1) + '°F';
+        }
+
+        const hvacModeEl = document.getElementById('hvacMode');
+        if (hvacModeEl) {
+            hvacModeEl.textContent = (thermostat_data.hvac_mode || 'unknown').toUpperCase();
+        }
+
+        const hvacActionEl = document.getElementById('hvacAction');
+        if (hvacActionEl) {
+            hvacActionEl.textContent = (thermostat_data.hvac_action || 'unknown').toUpperCase();
         }
     }
 

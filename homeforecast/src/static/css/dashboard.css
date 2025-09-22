@@ -160,6 +160,61 @@ body {
     background-color: rgba(244, 67, 54, 0.1);
 }
 
+/* Climate Action Status */
+.action-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-radius: 25px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.action-status::before {
+    content: '';
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: currentColor;
+}
+
+.action-heating {
+    color: #FF5722;
+    background-color: rgba(255, 87, 34, 0.15);
+}
+
+.action-cooling {
+    color: #2196F3;
+    background-color: rgba(33, 150, 243, 0.15);
+}
+
+.action-heat {
+    color: #FF9800;
+    background-color: rgba(255, 152, 0, 0.15);
+}
+
+.action-cool {
+    color: #03A9F4;
+    background-color: rgba(3, 169, 244, 0.15);
+}
+
+.action-monitor, .action-none {
+    color: #4CAF50;
+    background-color: rgba(76, 175, 80, 0.15);
+}
+
+.action-off {
+    color: #757575;
+    background-color: rgba(117, 117, 117, 0.15);
+}
+
+.action-unknown {
+    color: var(--warning-color);
+    background-color: rgba(255, 152, 0, 0.15);
+}
+
 /* Buttons */
 .btn {
     background-color: var(--primary-color);

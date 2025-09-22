@@ -80,26 +80,25 @@
             <div class="card">
                 <h2>
                     <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
-                        <path fill-rule="evenodd" d="M4 5a2 2 0 012-2 1 1 0 000 2H4a1 1 0 00-1 1v6a1 1 0 001 1h1a1 1 0 100 2H4a2 2 0 01-2-2V5zm12 0a2 2 0 00-2-2 1 1 0 100 2h2a1 1 0 011 1v6a1 1 0 01-1 1h-1a1 1 0 100 2h1a2 2 0 002-2V5z" clip-rule="evenodd"/>
+                        <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3z"/>
                     </svg>
-                    Comfort Analysis
+                    Climate Action Insights
                 </h2>
                 <div class="metric">
-                    <span class="metric-label">Recommended Mode:</span>
-                    <span class="metric-value large" id="recommendedMode">-</span>
+                    <span class="metric-label">Recommended Action:</span>
+                    <span class="metric-value large action-status" id="recommendedAction">-</span>
                 </div>
                 <div class="metric">
-                    <span class="metric-label">Time to Upper Limit:</span>
-                    <span class="metric-value" id="timeToUpper">-</span>
+                    <span class="metric-label">Climate Action Off Time:</span>
+                    <span class="metric-value" id="actionOffTime">-</span>
                 </div>
                 <div class="metric">
-                    <span class="metric-label">Time to Lower Limit:</span>
-                    <span class="metric-value" id="timeToLower">-</span>
+                    <span class="metric-label">Next Climate On Time:</span>
+                    <span class="metric-value" id="nextActionTime">-</span>
                 </div>
                 <div class="metric">
-                    <span class="metric-label">Comfort Score:</span>
-                    <span class="metric-value" id="comfortScore">-</span>
+                    <span class="metric-label">Estimated Run Time:</span>
+                    <span class="metric-value" id="estimatedRuntime">-</span>
                 </div>
             </div>
         </div>
@@ -131,7 +130,46 @@
 
         <!-- Analysis Tab -->
         <div id="analysisTab" class="tab-content">
+            <!-- Comfort Analysis Section -->
             <div class="grid grid-2">
+                <div class="card">
+                    <h2>
+                        <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
+                            <path fill-rule="evenodd" d="M4 5a2 2 0 012-2 1 1 0 000 2H4a1 1 0 00-1 1v6a1 1 0 001 1h1a1 1 0 100 2H4a2 2 0 01-2-2V5zm12 0a2 2 0 00-2-2 1 1 0 100 2h2a1 1 0 011 1v6a1 1 0 01-1 1h-1a1 1 0 100 2h1a2 2 0 002-2V5z" clip-rule="evenodd"/>
+                        </svg>
+                        Detailed Comfort Analysis
+                    </h2>
+                    <div class="metric">
+                        <span class="metric-label">Recommended Mode:</span>
+                        <span class="metric-value large" id="recommendedMode">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Time to Upper Limit:</span>
+                        <span class="metric-value" id="timeToUpper">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Time to Lower Limit:</span>
+                        <span class="metric-value" id="timeToLower">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Comfort Score:</span>
+                        <span class="metric-value" id="comfortScore">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Current Setpoint:</span>
+                        <span class="metric-value" id="currentSetpoint">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">HVAC Mode:</span>
+                        <span class="metric-value" id="hvacMode">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">HVAC Action:</span>
+                        <span class="metric-value" id="hvacAction">-</span>
+                    </div>
+                </div>
+                
                 <div class="card">
                     <h2>Energy Efficiency</h2>
                     <div class="metric">
@@ -145,9 +183,12 @@
                         <canvas id="energyChart"></canvas>
                     </div>
                 </div>
-                
+            </div>
+
+            <!-- Configuration Section -->
+            <div class="grid grid-2">
                 <div class="card">
-                    <h2>Configuration</h2>
+                    <h2>Thermostat Configuration</h2>
                     <div class="metric">
                         <span class="metric-label">Comfort Range:</span>
                         <span class="metric-value">
@@ -159,12 +200,32 @@
                         <span class="metric-value" id="mlEnabled">-</span>
                     </div>
                     <div class="metric">
+                        <span class="metric-label">Smart HVAC Control:</span>
+                        <span class="metric-value" id="smartHvacEnabled">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Update Interval:</span>
+                        <span class="metric-value" id="updateInterval">-</span>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>ML Model Performance</h2>
+                    <div class="metric">
                         <span class="metric-label">ML Model Status:</span>
-                        <span class="metric-value" id="mlStatus">Not Trained</span>
+                        <span class="metric-value" id="mlStatus">-</span>
                     </div>
                     <div class="metric">
                         <span class="metric-label">ML Accuracy (R²):</span>
                         <span class="metric-value" id="mlAccuracy">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Training Data Points:</span>
+                        <span class="metric-value" id="trainingDataPoints">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Last Model Update:</span>
+                        <span class="metric-value" id="lastModelUpdate">-</span>
                     </div>
                 </div>
             </div>
