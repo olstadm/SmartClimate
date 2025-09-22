@@ -49,6 +49,7 @@ class Config:
     def _validate_config(self):
         """Validate configuration and ensure required fields exist"""
         required_fields = [
+            'ha_token',
             'indoor_temp_entity',
             'indoor_humidity_entity', 
             'hvac_entity',
@@ -97,13 +98,24 @@ class Config:
         
     def get_ha_url(self) -> str:
         """Get Home Assistant API URL"""
-        # When running as addon, use supervisor API to access Home Assistant
-        return "http://supervisor/core"
+        # Try to auto-detect Home Assistant host or use defaults
+        # When running as addon, try common internal addresses first
+        possible_hosts = [
+            'homeassistant.local',  # Common hostname
+            '192.168.1.100',      # Common IP (user may need to configure)
+            'localhost'            # Fallback for development
+        ]
+        
+        # Allow override via environment or configuration
+        ha_host = self.get('ha_host') or os.environ.get('HA_HOST', possible_hosts[0])
+        ha_port = self.get('ha_port', 8123)
+        
+        return f"http://{ha_host}:{ha_port}/api"
         
     def get_ha_token(self) -> Optional[str]:
         """Get Home Assistant access token"""
-        # When running as addon, token is in environment
-        return os.environ.get('SUPERVISOR_TOKEN')
+        # Use user-provided long-lived access token from configuration
+        return self.get('ha_token')
         
     def to_dict(self) -> Dict:
         """Get full configuration as dictionary"""

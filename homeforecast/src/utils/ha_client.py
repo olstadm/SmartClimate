@@ -35,7 +35,7 @@ class HomeAssistantClient:
             
             # Test connection
             async with self.session.get(
-                f"{self.base_url}/api/",
+                f"{self.base_url}/",
                 headers=self.headers
             ) as resp:
                 if resp.status == 200:
@@ -112,7 +112,7 @@ class HomeAssistantClient:
         """Get state of an entity"""
         try:
             async with self.session.get(
-                f"{self.base_url}/api/states/{entity_id}",
+                f"{self.base_url}/states/{entity_id}",
                 headers=self.headers
             ) as resp:
                 if resp.status == 200:
@@ -130,7 +130,7 @@ class HomeAssistantClient:
         """Get HVAC operating state from climate entity"""
         try:
             async with self.session.get(
-                f"{self.base_url}/api/states/{entity_id}",
+                f"{self.base_url}/states/{entity_id}",
                 headers=self.headers
             ) as resp:
                 if resp.status == 200:
@@ -274,7 +274,7 @@ class HomeAssistantClient:
             }
             
             async with self.session.post(
-                f"{self.base_url}/api/states/{entity_id}",
+                f"{self.base_url}/states/{entity_id}",
                 headers=self.headers,
                 json=data
             ) as resp:
@@ -290,7 +290,7 @@ class HomeAssistantClient:
         """Fire an event in Home Assistant"""
         try:
             async with self.session.post(
-                f"{self.base_url}/api/events/{event_type}",
+                f"{self.base_url}/events/{event_type}",
                 headers=self.headers,
                 json=event_data
             ) as resp:
@@ -306,7 +306,7 @@ class HomeAssistantClient:
         """Call a Home Assistant service"""
         try:
             async with self.session.post(
-                f"{self.base_url}/api/services/{domain}/{service}",
+                f"{self.base_url}/services/{domain}/{service}",
                 headers=self.headers,
                 json=service_data
             ) as resp:

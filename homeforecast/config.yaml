@@ -1,5 +1,5 @@
 name: "HomeForecast"
-version: "1.0.7"
+version: "1.0.8"
 slug: "homeforecast-local"
 description: "Smart thermal forecasting for your home - predicts indoor climate and HVAC needs"
 url: "https://github.com/olstadm/SmartClimate"
@@ -35,6 +35,9 @@ options:
   ml_retrain_days: 30
   data_retention_days: 90
 schema:
+  ha_token: str
+  ha_host: str?
+  ha_port: int(1,65535)?
   indoor_temp_entity: str
   indoor_humidity_entity: str
   outdoor_temp_entity: str?
