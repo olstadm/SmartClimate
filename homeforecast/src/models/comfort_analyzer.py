@@ -41,10 +41,21 @@ class ComfortAnalyzer:
             Comfort analysis with recommendations
         """
         try:
-            # Get trajectories
-            idle_traj = forecast_result['idle_trajectory']
-            controlled_traj = forecast_result['controlled_trajectory']
-            current_traj = forecast_result['current_trajectory']
+            # Get trajectories with fallback for missing keys
+            idle_traj = forecast_result.get('idle_trajectory', [])
+            controlled_traj = forecast_result.get('controlled_trajectory', [])
+            current_traj = forecast_result.get('current_trajectory', idle_traj)  # Fallback to idle_traj
+            
+            # If no trajectories are available, return empty analysis
+            if not idle_traj:
+                logger.warning("No trajectory data available for comfort analysis")
+                return {
+                    'time_to_upper_limit': None,
+                    'time_to_lower_limit': None,
+                    'recommended_mode': 'off',
+                    'comfort_score': 50,
+                    'analysis': 'Insufficient data for comfort analysis'
+                }
             
             # Find critical times
             time_to_upper, upper_timestamp = self._find_time_to_limit(

@@ -174,17 +174,20 @@ class DataStore:
     async def get_recent_measurements(self, hours: int = 24) -> List[Dict]:
         """Get recent measurements"""
         try:
-            cursor = self.conn.cursor()
-            
-            since = datetime.now() - timedelta(hours=hours)
-            
-            cursor.execute("""
-                SELECT * FROM measurements
-                WHERE timestamp > ?
-                ORDER BY timestamp DESC
-            """, (since,))
-            
-            rows = cursor.fetchall()
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                
+                since = datetime.now() - timedelta(hours=hours)
+                
+                cursor.execute("""
+                    SELECT * FROM measurements
+                    WHERE timestamp > ?
+                    ORDER BY timestamp DESC
+                """, (since,))
+                
+                rows = cursor.fetchall()
+                conn.close()
             
             measurements = []
             for row in rows:
@@ -199,21 +202,26 @@ class DataStore:
     async def get_training_data(self, days: int) -> List[Dict]:
         """Get training data for ML model"""
         try:
-            cursor = self.conn.cursor()
-            
-            since = datetime.now() - timedelta(days=days)
-            
-            # Get measurements with calculated residual errors
-            cursor.execute("""
-                SELECT 
-                    m.*,
-                    LAG(indoor_temp, 1) OVER (ORDER BY timestamp) as prev_temp,
-                    (indoor_temp - LAG(indoor_temp, 1) OVER (ORDER BY timestamp)) /
-                    ((JULIANDAY(timestamp) - JULIANDAY(LAG(timestamp, 1) OVER (ORDER BY timestamp))) * 24) as actual_rate
-                FROM measurements m
-                WHERE timestamp > ?
-                ORDER BY timestamp
-            """, (since,))
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                
+                since = datetime.now() - timedelta(days=days)
+                
+                # Get measurements with calculated residual errors
+                cursor.execute("""
+                    SELECT 
+                        m.*,
+                        LAG(indoor_temp, 1) OVER (ORDER BY timestamp) as prev_temp,
+                        (indoor_temp - LAG(indoor_temp, 1) OVER (ORDER BY timestamp)) /
+                        ((JULIANDAY(timestamp) - JULIANDAY(LAG(timestamp, 1) OVER (ORDER BY timestamp))) * 24) as actual_rate
+                    FROM measurements m
+                    WHERE timestamp > ?
+                    ORDER BY timestamp
+                """, (since,))
+                
+                rows = cursor.fetchall()
+                conn.close()
             
             rows = cursor.fetchall()
             
@@ -240,23 +248,26 @@ class DataStore:
                 pickle.dump(parameters, f)
                 
             # Also store in database for history
-            cursor = self.conn.cursor()
-            
-            # Extract basic info for database storage
-            if isinstance(parameters, dict):
-                params_json = json.dumps({
-                    k: v for k, v in parameters.items()
-                    if isinstance(v, (str, int, float, list, dict))
-                })
-            else:
-                params_json = json.dumps({'type': str(type(parameters))})
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
                 
-            cursor.execute("""
-                INSERT INTO model_parameters (model_name, parameters)
-                VALUES (?, ?)
-            """, (model_name, params_json))
-            
-            self.conn.commit()
+                # Extract basic info for database storage
+                if isinstance(parameters, dict):
+                    params_json = json.dumps({
+                        k: v for k, v in parameters.items()
+                        if isinstance(v, (str, int, float, list, dict))
+                    })
+                else:
+                    params_json = json.dumps({'type': str(type(parameters))})
+                
+                cursor.execute("""
+                    INSERT INTO model_parameters (model_name, parameters)
+                    VALUES (?, ?)
+                """, (model_name, params_json))
+                
+                conn.commit()
+                conn.close()
             
             logger.info(f"Saved parameters for model: {model_name}")
             
@@ -285,31 +296,34 @@ class DataStore:
     async def cleanup_old_data(self, retention_days: int):
         """Clean up data older than retention period"""
         try:
-            cursor = self.conn.cursor()
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                
+                cutoff = datetime.now() - timedelta(days=retention_days)
+                
+                # Clean up measurements
+                cursor.execute("DELETE FROM measurements WHERE timestamp < ?", (cutoff,))
+                measurements_deleted = cursor.rowcount
+                
+                # Clean up forecasts
+                cursor.execute("DELETE FROM forecasts WHERE timestamp < ?", (cutoff,))
+                forecasts_deleted = cursor.rowcount
             
-            cutoff = datetime.now() - timedelta(days=retention_days)
-            
-            # Clean up measurements
-            cursor.execute("DELETE FROM measurements WHERE timestamp < ?", (cutoff,))
-            measurements_deleted = cursor.rowcount
-            
-            # Clean up forecasts
-            cursor.execute("DELETE FROM forecasts WHERE timestamp < ?", (cutoff,))
-            forecasts_deleted = cursor.rowcount
-            
-            # Clean up old model parameters (keep last 10 per model)
-            cursor.execute("""
-                DELETE FROM model_parameters
-                WHERE id NOT IN (
-                    SELECT id FROM (
-                        SELECT id, ROW_NUMBER() OVER (PARTITION BY model_name ORDER BY timestamp DESC) as rn
-                        FROM model_parameters
-                    ) WHERE rn <= 10
-                )
-            """)
-            params_deleted = cursor.rowcount
-            
-            self.conn.commit()
+                # Clean up old model parameters (keep last 10 per model)
+                cursor.execute("""
+                    DELETE FROM model_parameters
+                    WHERE id NOT IN (
+                        SELECT id FROM (
+                            SELECT id, ROW_NUMBER() OVER (PARTITION BY model_name ORDER BY timestamp DESC) as rn
+                            FROM model_parameters
+                        ) WHERE rn <= 10
+                    )
+                """)
+                params_deleted = cursor.rowcount
+                
+                conn.commit()
+                conn.close()
             
             logger.info(f"Cleanup complete: {measurements_deleted} measurements, "
                        f"{forecasts_deleted} forecasts, {params_deleted} parameter sets deleted")

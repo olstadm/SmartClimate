@@ -215,29 +215,39 @@ def create_app(homeforecast_instance):
     def get_logs():
         """Get recent log entries"""
         try:
-            log_file = '/proc/1/fd/1'  # Docker container stdout
-            if not os.path.exists(log_file):
-                # Fallback to supervisor logs
-                log_file = '/proc/self/fd/1'
+            # In Home Assistant addon containers, logs are typically not accessible
+            # from within the container. Direct users to the supervisor logs instead.
+            help_message = """
+HomeForecast Addon Logs
+
+For full logs, please use one of these methods:
+
+1. Home Assistant UI:
+   - Go to Settings > Add-ons
+   - Click on HomeForecast
+   - Click the "Log" tab
+
+2. Home Assistant CLI:
+   - ha addons logs homeforecast-local
+
+3. Direct supervisor logs:
+   - docker logs addon_homeforecast-local
+
+Recent console output from this session is not accessible 
+from within the addon container for security reasons.
+
+Check the Home Assistant supervisor logs for detailed 
+information about HomeForecast operation.
+            """.strip()
             
-            # Read last 100 lines of logs
-            try:
-                with open(log_file, 'r') as f:
-                    lines = f.readlines()
-                    recent_lines = lines[-100:] if len(lines) > 100 else lines
-                    return jsonify({
-                        'logs': ''.join(recent_lines),
-                        'lines': recent_lines
-                    })
-            except:
-                # If can't read logs, return a helpful message
-                return jsonify({
-                    'logs': 'Log file not accessible. Check Home Assistant Supervisor logs for HomeForecast addon.',
-                    'lines': []
-                })
+            return jsonify({
+                'logs': help_message,
+                'lines': help_message.split('\n'),
+                'redirect_message': 'Use Home Assistant > Settings > Add-ons > HomeForecast > Log tab for full logs'
+            })
                 
         except Exception as e:
-            return jsonify({'error': f'Error reading logs: {str(e)}'}), 500
+            return jsonify({'error': f'Error: {str(e)}'}), 500
     
     @app.route('/logs')
     def logs_page():
