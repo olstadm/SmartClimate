@@ -193,6 +193,26 @@ def _analyze_hvac_schedule_from_trajectory(trajectory, current_temp, hvac_mode):
     
     if not trajectory or len(trajectory) < 2:
         return insights
+
+
+def _analyze_optimal_hvac_timing(idle_trajectory, controlled_trajectory, current_temp, hvac_mode, comfort_min=68.0, comfort_max=80.0):
+    """
+    Analyze uncontrolled temperature trajectory to determine optimal HVAC timing
+    Based on 'set it and forget it' logic using comfort thresholds
+    
+    Logic:
+    - COOLING: Turn on when uncontrolled temp would exceed comfort_max, turn off when it drops to comfort_max
+    - HEATING: Turn on when uncontrolled temp would fall below comfort_min, turn off when it rises to comfort_min
+    """
+    insights = {
+        'recommended_action': 'MONITOR',
+        'next_action_time': 'N/A',
+        'action_off_time': 'N/A',
+        'estimated_runtime': 'N/A'
+    }
+    
+    if not idle_trajectory or len(idle_trajectory) < 2:
+        return insights
     
     try:
         # Use timezone-aware datetime to match trajectory timestamps
@@ -202,55 +222,116 @@ def _analyze_hvac_schedule_from_trajectory(trajectory, current_temp, hvac_mode):
         else:
             now = datetime.now()
             
-        current_hvac_on = False
-        hvac_start_time = None
-        hvac_end_time = None
+        logger.info(f"🔍 Analyzing optimal HVAC timing - Mode: {hvac_mode}, Current: {current_temp}°F, " +
+                   f"Comfort range: {comfort_min}-{comfort_max}°F")
+                   
+        turn_on_time = None
+        turn_off_time = None
         
-        # Analyze trajectory for HVAC activity patterns
-        # Note: trajectory contains forecast projections based on hvac_mode settings
-        for i, point in enumerate(trajectory):
-            hvac_state = point.get('hvac_state', 'idle')
-            timestamp = point.get('timestamp', now)
+        # Check if we need immediate action based on current temperature
+        if hvac_mode == 'cool' and current_temp >= comfort_max:
+            insights['recommended_action'] = 'COOL NOW'
+            insights['next_action_time'] = "Now"
+            turn_on_time = now
             
-            # Check if HVAC is active (heating or cooling) - forecast prediction
-            is_active = hvac_state in ['heating', 'cooling', 'heat', 'cool']
+        elif hvac_mode == 'heat' and current_temp <= comfort_min:
+            insights['recommended_action'] = 'HEAT NOW'
+            insights['next_action_time'] = "Now"  
+            turn_on_time = now
             
-            # Detect HVAC start
-            if is_active and not current_hvac_on:
-                hvac_start_time = timestamp
-                current_hvac_on = True
-                # Determine action type
-                if hvac_state in ['cooling', 'cool']:
-                    insights['recommended_action'] = 'COOL SOON'
-                elif hvac_state in ['heating', 'heat']:
-                    insights['recommended_action'] = 'HEAT SOON'
-                    
-            # Detect HVAC end
-            elif not is_active and current_hvac_on:
-                hvac_end_time = timestamp
-                current_hvac_on = False
+        elif hvac_mode == 'off':
+            insights['recommended_action'] = 'SYSTEM OFF'
+            insights['next_action_time'] = 'Switch mode to HEAT/COOL'
+            insights['action_off_time'] = 'N/A (Mode set to OFF)'
+            insights['estimated_runtime'] = 'N/A (OFF Mode)'
+            return insights
+            
+        else:
+            # Analyze uncontrolled trajectory to find optimal timing
+            for point in idle_trajectory:
+                timestamp = point.get('timestamp', now)
+                idle_temp = point.get('indoor_temp', current_temp)
                 
-                # Calculate runtime
-                if hvac_start_time:
-                    runtime_hours = (hvac_end_time - hvac_start_time).total_seconds() / 3600
-                    insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
+                # Skip historical points - only look at future
+                if timestamp <= now:
+                    continue
                     
-                break  # Use first HVAC cycle found
+                # COOLING MODE: Turn on when uncontrolled temp would exceed max
+                if hvac_mode == 'cool' and not turn_on_time:
+                    if idle_temp >= comfort_max:
+                        turn_on_time = timestamp
+                        insights['recommended_action'] = 'COOL SOON'
+                        insights['next_action_time'] = format_time_consistent(turn_on_time)
+                        logger.info(f"📅 Cool start needed at {format_time_consistent(turn_on_time)} " +
+                                  f"when uncontrolled temp reaches {idle_temp:.1f}°F")
+                        
+                # HEATING MODE: Turn on when uncontrolled temp would fall below min  
+                elif hvac_mode == 'heat' and not turn_on_time:
+                    if idle_temp <= comfort_min:
+                        turn_on_time = timestamp
+                        insights['recommended_action'] = 'HEAT SOON'
+                        insights['next_action_time'] = format_time_consistent(turn_on_time)
+                        logger.info(f"📅 Heat start needed at {format_time_consistent(turn_on_time)} " +
+                                  f"when uncontrolled temp drops to {idle_temp:.1f}°F")
         
-        # Set times based on findings
-        if hvac_start_time:
-            insights['next_action_time'] = format_time_consistent(hvac_start_time)
-            
-        if hvac_end_time:
-            insights['action_off_time'] = format_time_consistent(hvac_end_time)
-        elif current_hvac_on and hvac_start_time:
-            # Still running at end of forecast
+        # Find turn off time by analyzing when controlled temperature returns to comfort zone
+        if turn_on_time and controlled_trajectory:
+            for point in controlled_trajectory:
+                timestamp = point.get('timestamp', now)
+                controlled_temp = point.get('indoor_temp', current_temp)
+                
+                # Skip to points after turn_on_time
+                if timestamp <= turn_on_time:
+                    continue
+                    
+                # COOLING: Turn off when controlled temp reaches comfort_max (our setpoint)
+                if hvac_mode == 'cool':
+                    if controlled_temp <= comfort_max:
+                        turn_off_time = timestamp
+                        insights['action_off_time'] = format_time_consistent(turn_off_time)
+                        break
+                        
+                # HEATING: Turn off when controlled temp reaches comfort_min (our setpoint)
+                elif hvac_mode == 'heat':
+                    if controlled_temp >= comfort_min:
+                        turn_off_time = timestamp
+                        insights['action_off_time'] = format_time_consistent(turn_off_time)
+                        break
+        
+        # Calculate estimated runtime
+        if turn_on_time and turn_off_time:
+            runtime_hours = (turn_off_time - turn_on_time).total_seconds() / 3600
+            insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
+            logger.info(f"⏱️ Estimated runtime: {insights['estimated_runtime']} " +
+                       f"({format_time_consistent(turn_on_time)} to {format_time_consistent(turn_off_time)})")
+        elif turn_on_time:
             insights['action_off_time'] = "Beyond forecast"
+            insights['estimated_runtime'] = "Beyond forecast"
+            
+        # If no action needed in forecast period
+        if not turn_on_time and hvac_mode in ['cool', 'heat']:
+            insights['recommended_action'] = 'NO ACTION NEEDED'
+            insights['next_action_time'] = 'Beyond forecast period'
+            insights['action_off_time'] = 'N/A'
+            insights['estimated_runtime'] = '0 min'
             
     except Exception as e:
-        logger.warning(f"Error analyzing HVAC schedule: {e}")
+        logger.warning(f"Error analyzing optimal HVAC timing: {e}")
         
     return insights
+
+
+def _analyze_hvac_schedule_from_trajectory(trajectory, current_temp, hvac_mode):
+    """Legacy function - kept for backwards compatibility"""
+    insights = {
+        'recommended_action': 'MONITOR',
+        'next_action_time': 'N/A',
+        'action_off_time': 'N/A',
+        'estimated_runtime': 'N/A'
+    }
+    
+    if not trajectory or len(trajectory) < 2:
+        return insights
 
 
 def calculate_climate_insights(current_data, thermostat_data, config, comfort_analyzer=None):
@@ -295,24 +376,41 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
         
         logger.info(f"📊 Using comfort band: {comfort_min}°F - {comfort_max}°F (target setpoint: {target_temp}°F)")
         
-        # Try to get forecast-based insights from comfort analyzer
+        # Try to get optimal timing insights from comfort analyzer trajectories
         forecast_insights = None
         if comfort_analyzer and hasattr(comfort_analyzer, 'homeforecast'):
             try:
                 # Check if we have recent forecast data stored in comfort analyzer
                 if hasattr(comfort_analyzer, 'latest_forecast_data') and comfort_analyzer.latest_forecast_data:
                     forecast_data = comfort_analyzer.latest_forecast_data
-                    if 'controlled_trajectory' in forecast_data:
+                    
+                    # Use both idle and controlled trajectories for optimal timing analysis
+                    if 'idle_trajectory' in forecast_data and 'controlled_trajectory' in forecast_data:
+                        idle_trajectory = forecast_data['idle_trajectory']
+                        controlled_trajectory = forecast_data['controlled_trajectory']
+                        
+                        # Use the new optimal timing analysis
+                        forecast_insights = _analyze_optimal_hvac_timing(
+                            idle_trajectory, controlled_trajectory, current_temp, hvac_mode, 
+                            comfort_min, comfort_max
+                        )
+                        logger.debug(f"Optimal timing analysis: idle={len(idle_trajectory)} points, " +
+                                   f"controlled={len(controlled_trajectory)} points")
+                    
+                    # Fallback to legacy method if only controlled trajectory available
+                    elif 'controlled_trajectory' in forecast_data:
                         trajectory = forecast_data['controlled_trajectory']
                         forecast_insights = _analyze_hvac_schedule_from_trajectory(trajectory, current_temp, hvac_mode)
-                        logger.debug(f"Found {len(trajectory)} trajectory points for insights")
+                        logger.debug(f"Legacy trajectory analysis: {len(trajectory)} points")
+                        
             except Exception as e:
-                logger.debug(f"Could not get forecast insights: {e}")
+                logger.warning(f"Could not get forecast insights: {e}")
         
         # If we have forecast insights, use them
         if forecast_insights:
             insights.update(forecast_insights)
-            logger.info(f"Using forecast-based climate insights: {insights['recommended_action']}")
+            logger.info(f"Using forecast-based optimal timing: {insights['recommended_action']} " +
+                       f"(On: {insights['next_action_time']}, Off: {insights['action_off_time']})")
         else:
             # Fallback to current state analysis
             logger.info("Using current state for climate insights")
@@ -681,7 +779,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '1.9.0',
+                'addon_version': '1.9.1',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -718,7 +816,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '1.9.0',
+                'version': '1.9.1',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
