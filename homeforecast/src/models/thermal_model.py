@@ -332,13 +332,29 @@ class ThermalModel:
             outdoor_std = np.std(outdoor_temps)
             outdoor_range = max(outdoor_temps) - min(outdoor_temps)
             
-            # Predict expected indoor response based on outdoor trends
+            # Predict expected indoor response based on TEMPERATURE DIFFERENTIAL, not outdoor trend
             current_outdoor = current_conditions.get('outdoor_temp', 70.0)
             current_indoor = current_conditions.get('indoor_temp', 70.0)
             
             # Use thermal model parameters to predict indoor response
             thermal_coupling = abs(self.rls.theta[0]) if len(self.rls.theta) > 0 else 0.1  # 'a' parameter
-            expected_indoor_trend = outdoor_trend * thermal_coupling * 0.5  # Damped response
+            
+            # CRITICAL FIX: Indoor trend should be based on temperature differential
+            temp_differential = current_outdoor - current_indoor
+            
+            # Indoor temperature moves towards outdoor temperature (basic thermal physics)
+            if temp_differential > 0:
+                # Outdoor warmer: indoor should warm up (positive trend)
+                expected_indoor_trend = thermal_coupling * min(abs(temp_differential), 5.0)  # Max 5°F/hr natural warming
+            elif temp_differential < 0:
+                # Outdoor cooler: indoor should cool down (negative trend)  
+                expected_indoor_trend = -thermal_coupling * min(abs(temp_differential), 5.0)  # Max 5°F/hr natural cooling
+            else:
+                # Temperatures equal: minimal change
+                expected_indoor_trend = 0.0
+            
+            logger.info(f"🌡️ Physics-based trend: T_out={current_outdoor:.1f}°F, T_in={current_indoor:.1f}°F, " +
+                       f"diff={temp_differential:.1f}°F → expected_indoor_trend={expected_indoor_trend:+.3f}°F/hr")
             
             # Calculate trend alignment score (how well indoor should follow outdoor)
             if abs(outdoor_trend) > 0.5:  # Significant outdoor trend
@@ -359,10 +375,11 @@ class ThermalModel:
                     'thermal_lag_hours': round(1 / thermal_coupling, 1) if thermal_coupling > 0 else 8.0
                 },
                 'trend_validation': {
-                    'outdoor_rising_indoor_should_follow': outdoor_trend > 0.5,
-                    'outdoor_falling_indoor_should_follow': outdoor_trend < -0.5,
-                    'significant_trend_detected': abs(outdoor_trend) > 0.5,
-                    'coupling_factor': thermal_coupling
+                    'outdoor_warmer_indoor_should_warm': temp_differential > 1.0,
+                    'outdoor_cooler_indoor_should_cool': temp_differential < -1.0,
+                    'significant_temperature_differential': abs(temp_differential) > 2.0,
+                    'coupling_factor': thermal_coupling,
+                    'temperature_differential': round(temp_differential, 1)
                 },
                 'data_quality': {
                     'historical_points': len(historical_weather),
@@ -435,14 +452,18 @@ class ThermalModel:
             needs_correction = False
             correction_reason = ""
             
-            # Check for illogical predictions
-            if trend_analysis['trend_validation']['significant_trend_detected']:
-                if outdoor_trend > 0.5 and prediction < current_indoor - 1.0:
+            # Check for physics violations based on temperature differential (not outdoor trend)
+            current_outdoor = current_conditions.get('outdoor_temp', 70.0)
+            temp_differential = current_outdoor - current_indoor
+            
+            # Physics check: Indoor temp should move towards outdoor temp
+            if time_hours > 0.5:  # Only check for predictions > 30 minutes out
+                if temp_differential > 2.0 and prediction < current_indoor:
                     needs_correction = True
-                    correction_reason = f"Outdoor rising ({outdoor_trend:+.2f}°F/hr) but prediction shows indoor falling"
-                elif outdoor_trend < -0.5 and prediction > current_indoor + 1.0:
-                    needs_correction = True
-                    correction_reason = f"Outdoor falling ({outdoor_trend:+.2f}°F/hr) but prediction shows indoor rising"
+                    correction_reason = f"Outdoor warmer by {temp_differential:.1f}°F but prediction shows cooling"
+                elif temp_differential < -2.0 and prediction > current_indoor:
+                    needs_correction = True  
+                    correction_reason = f"Outdoor cooler by {temp_differential:.1f}°F but prediction shows warming"
             
             # Apply correction if needed
             corrected_prediction = prediction
