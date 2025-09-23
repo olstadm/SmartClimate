@@ -488,7 +488,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '1.8.11',
+                'addon_version': '1.8.12',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -506,7 +506,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '1.8.11',
+                'version': '1.8.12',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
@@ -821,13 +821,32 @@ def create_app(homeforecast_instance):
                 estimated_duration = "10-30 seconds"
                 training_possible = True
             
+            # Get sample of available columns for debugging
+            sample_columns = []
+            if data_points > 0:
+                try:
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        sample_data = loop.run_until_complete(
+                            app.homeforecast.data_store.get_training_data(1)  # Just 1 day for column inspection
+                        )
+                        if sample_data and len(sample_data) > 0:
+                            sample_columns = list(sample_data[0].keys())
+                    finally:
+                        loop.close()
+                except Exception as e:
+                    logger.debug(f"Could not get sample columns: {e}")
+            
             return jsonify({
                 'model_type': app.homeforecast.config.get('ml_model_type', 'Random Forest'),
                 'data_points': data_points,
                 'training_period': f"{app.homeforecast.config.get('ml_training_days', 30)} days",
                 'estimated_duration': estimated_duration,
                 'training_possible': training_possible,
-                'current_status': 'Trained' if (ml_corrector and ml_corrector.is_trained) else 'Not Trained'
+                'current_status': 'Trained' if (ml_corrector and ml_corrector.is_trained) else 'Not Trained',
+                'available_columns': sample_columns[:10] if sample_columns else []  # First 10 columns for debugging
             })
             
         except Exception as e:
@@ -884,9 +903,33 @@ def create_app(homeforecast_instance):
                     }
                 })
             else:
+                # Provide more specific error messages based on the state
+                if not ml_corrector.is_trained:
+                    error_msg = 'Training failed - insufficient data quality. '
+                    
+                    # Get the actual data count to help diagnose
+                    try:
+                        loop = asyncio.new_event_loop() 
+                        asyncio.set_event_loop(loop)
+                        try:
+                            training_data = loop.run_until_complete(
+                                app.homeforecast.data_store.get_training_data(30)
+                            )
+                            data_count = len(training_data) if training_data else 0
+                            if data_count < 100:
+                                error_msg += f'Only {data_count} data points available (need 100+).'
+                            else:
+                                error_msg += 'Data preparation failed - check logs for feature issues.'
+                        finally:
+                            loop.close()
+                    except:
+                        error_msg += 'Unable to assess data quality.'
+                else:
+                    error_msg = 'Training completed but performance history is missing.'
+                
                 return jsonify({
                     'success': False,
-                    'error': 'Training completed but model is not in trained state. Check logs for details.'
+                    'error': error_msg
                 }), 500
                 
         except Exception as e:

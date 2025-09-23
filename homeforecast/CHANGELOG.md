@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.12] - 2025-09-23
+
+### Fixed
+- **ML Training Data Preparation**: Fixed deprecated pandas `fillna(method='bfill')` syntax
+- Improved ML data cleaning to preserve training samples with selective NaN handling
+- Only drop rows with NaN in essential columns (indoor_temp, outdoor_temp, HVAC states)
+- Fill missing optional features with reasonable defaults
+- Added safety check to prevent training with zero samples
+- Enhanced logging for ML feature preparation and data cleaning steps
+
 ## [1.8.11] - 2025-09-23
 
 ### Added

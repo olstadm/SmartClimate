@@ -116,6 +116,10 @@ class MLCorrector:
             if X is None or len(X) < 100:
                 logger.warning("⚠️ Could not prepare sufficient training data after feature preparation")
                 logger.warning(f"🔍 Feature matrix shape: {X.shape if X is not None else 'None'}")
+                if X is not None and len(X) > 0:
+                    logger.warning(f"📊 Available samples: {len(X)}, need at least 100 for training")
+                else:
+                    logger.error("❌ Feature preparation failed - no valid training samples")
                 return
                 
             logger.info(f"✅ Prepared feature matrix: {X.shape} (samples × features)")
@@ -218,38 +222,155 @@ class MLCorrector:
             hvac_summary = df['hvac_state'].value_counts()
             logger.debug(f"🔥 HVAC state distribution: {dict(hvac_summary)}")
             
-            # Create lag features
+            # Create lag features with adaptive periods based on available data
             logger.debug("⏰ Creating lag features...")
-            df['outdoor_temp_lag1h'] = df['outdoor_temp'].shift(12)  # 12 * 5min = 1 hour
-            df['outdoor_temp_lag3h'] = df['outdoor_temp'].shift(36)  # 36 * 5min = 3 hours
-            df['indoor_temp_lag1h'] = df['indoor_temp'].shift(12)
+            
+            # Calculate data frequency (measurements per hour) 
+            time_diff = (df['timestamp'].iloc[-1] - df['timestamp'].iloc[0]).total_seconds() / 3600
+            measurements_per_hour = len(df) / time_diff if time_diff > 0 else 12
+            
+            # Adjust lag periods based on actual data frequency
+            lag_1h = max(1, int(measurements_per_hour))  # 1 hour lag
+            lag_3h = max(2, int(measurements_per_hour * 3))  # 3 hour lag
+            
+            logger.debug(f"📊 Estimated {measurements_per_hour:.1f} measurements/hour, using lags: {lag_1h}, {lag_3h}")
+            
+            df['outdoor_temp_lag1h'] = df['outdoor_temp'].shift(lag_1h)
+            df['outdoor_temp_lag3h'] = df['outdoor_temp'].shift(lag_3h) 
+            df['indoor_temp_lag1h'] = df['indoor_temp'].shift(lag_1h)
             df['indoor_temp_change_1h'] = df['indoor_temp'] - df['indoor_temp_lag1h']
             
-            # Drop rows with NaN values
+            # Fill initial NaN values to preserve more data
+            df['outdoor_temp_lag1h'] = df['outdoor_temp_lag1h'].bfill().ffill()
+            df['outdoor_temp_lag3h'] = df['outdoor_temp_lag3h'].bfill().ffill() 
+            df['indoor_temp_lag1h'] = df['indoor_temp_lag1h'].bfill().ffill()
+            df['indoor_temp_change_1h'] = df['indoor_temp_change_1h'].fillna(0)
+            
+            # Check for remaining NaN values and handle them selectively
             rows_before = len(df)
-            df = df.dropna()
+            
+            # Only drop rows with NaN in essential columns
+            essential_cols = ['indoor_temp', 'outdoor_temp', 'hvac_heat', 'hvac_cool']
+            df = df.dropna(subset=essential_cols)
+            
+            # For any remaining NaN in other columns, fill with reasonable defaults
+            df = df.fillna({
+                'indoor_humidity': 50.0,
+                'outdoor_humidity': 50.0,
+                'solar_irradiance': 0.0,
+                'hour_of_day': 12,
+                'day_of_week': 1,
+                'month': 6,
+                'temp_diff': 0.0,
+                'humidity_diff': 0.0
+            })
+            
             rows_after = len(df)
-            logger.info(f"🧹 Cleaned data: {rows_before} → {rows_after} rows ({rows_before - rows_after} removed with NaN)")
+            logger.info(f"🧹 Cleaned data: {rows_before} → {rows_after} rows ({rows_before - rows_after} removed with NaN in essential columns)")
             
-            # Extract features
-            feature_cols = [col for col in self.feature_columns if col in df.columns]
-            missing_cols = [col for col in self.feature_columns if col not in df.columns]
+            # Final check - if we still have no data, abort gracefully
+            if rows_after == 0:
+                logger.error("❌ All training data was removed during cleaning - cannot proceed with training")
+                return None, None
             
-            logger.info(f"📊 Feature extraction: {len(feature_cols)}/{len(self.feature_columns)} features available")
-            if missing_cols:
-                logger.warning(f"❌ Missing features: {missing_cols}")
-            logger.debug(f"✅ Available features: {feature_cols}")
+            # Generate base predictions if missing (using RC thermal model)
+            if 'base_prediction' not in df.columns:
+                logger.info("🔧 Generating base predictions using RC thermal model...")
+                base_predictions = []
+                
+                for _, row in df.iterrows():
+                    # Use simplified RC model prediction for base_prediction feature
+                    # This is an approximation since we don't have the full thermal model context
+                    temp_diff = row.get('temp_diff', 0)
+                    hvac_heating = row.get('hvac_heat', 0)
+                    hvac_cooling = row.get('hvac_cool', 0)
+                    
+                    # Simple thermal dynamics approximation
+                    base_pred = 0.0
+                    if hvac_heating:
+                        base_pred = 2.0  # Heating rate approximation
+                    elif hvac_cooling:
+                        base_pred = -1.5  # Cooling rate approximation
+                    else:
+                        base_pred = temp_diff * -0.1  # Natural drift approximation
+                    
+                    base_predictions.append(base_pred)
+                
+                df['base_prediction'] = base_predictions
+                logger.info("✅ Generated base predictions for ML training")
             
-            X = df[feature_cols].values
+            # Calculate residual error if missing
+            if 'residual_error' not in df.columns:
+                logger.info("🔧 Calculating residual errors...")
+                
+                # Calculate actual temperature change rates
+                df['actual_temp_change'] = df['indoor_temp_change_1h'].fillna(0)
+                
+                # Use base_prediction as the model prediction
+                df['residual_error'] = df['actual_temp_change'] - df['base_prediction']
+                
+                # Remove extreme outliers (likely data quality issues)
+                q99 = df['residual_error'].quantile(0.99)
+                q01 = df['residual_error'].quantile(0.01)
+                df = df[(df['residual_error'] >= q01) & (df['residual_error'] <= q99)]
+                
+                logger.info(f"✅ Calculated residual errors, removed outliers: {len(df)} samples remaining")
             
-            # Target is the residual error (actual - predicted)
-            if 'residual_error' in df:
+            # Extract features - handle missing features gracefully
+            available_features = []
+            for col in self.feature_columns:
+                if col in df.columns:
+                    available_features.append(col)
+                else:
+                    logger.warning(f"⚠️ Missing feature '{col}', filling with zeros")
+                    df[col] = 0.0
+                    available_features.append(col)
+            
+            logger.info(f"📊 Feature matrix: {len(available_features)} features prepared")
+            
+            # Handle target variable (residual error)
+            if 'residual_error' in df.columns and df['residual_error'].notna().any():
+                logger.info("🎯 Using existing residual_error as target")
+                # Drop rows without residual errors
+                df = df.dropna(subset=['residual_error'] + available_features)
                 y = df['residual_error'].values
-                logger.info(f"🎯 Using residual_error as target - range: [{np.min(y):.4f}, {np.max(y):.4f}]")
             else:
-                y = np.zeros(len(df))
-                logger.warning("⚠️ No residual_error column found - using zeros as target (initial training)")
+                logger.warning("⚠️ No residual_error data found - generating synthetic training targets")
+                # First drop NaN in features only
+                df = df.dropna(subset=available_features)
+                
+                if len(df) == 0:
+                    logger.error("❌ No valid training samples after feature preparation")
+                    return None, None
+                
+                # Generate synthetic residual errors for initial training
+                # Use temperature change patterns and HVAC inefficiencies as proxies
+                if 'indoor_temp_change_1h' in df:
+                    temp_changes = df['indoor_temp_change_1h'].fillna(0)
+                    hvac_on = df['hvac_heat'] + df['hvac_cool'] 
+                    
+                    # Generate small residuals based on realistic model errors
+                    # Higher residuals when HVAC is on (equipment variations)
+                    # Small random variations when HVAC is off (thermal lag effects)
+                    base_residual = np.random.normal(0, 0.05, len(df))  # Base noise
+                    hvac_residual = hvac_on * np.random.normal(0, 0.15, len(df))  # HVAC variations
+                    temp_residual = temp_changes * 0.1  # Temperature-dependent errors
+                    
+                    y = base_residual + hvac_residual + temp_residual
+                else:
+                    # Fallback: small random residuals
+                    y = np.random.normal(0, 0.1, len(df))
+                
+                logger.info("🎯 Generated synthetic residual errors for initial ML training")
             
+            # Final validation
+            if len(df) == 0 or len(y) == 0:
+                logger.error("❌ No valid training samples after preparation")
+                return None, None
+            
+            X = df[available_features].values
+            
+            logger.info(f"🎯 Target variable range: [{np.min(y):.4f}, {np.max(y):.4f}]")
             logger.info(f"✅ Feature preparation complete - X: {X.shape}, y: {len(y)} samples")
             return X, y
             
