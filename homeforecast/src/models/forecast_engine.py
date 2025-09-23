@@ -73,7 +73,21 @@ class ForecastEngine:
             
             # Add valid historical weather points
             if historical_weather:
-                for point in historical_weather[-6:]:  # Use recent historical data
+                # Handle different formats of historical_weather data
+                hist_points = []
+                if isinstance(historical_weather, list):
+                    hist_points = historical_weather[-6:]  # Use recent historical data
+                elif isinstance(historical_weather, dict):
+                    # If it's a dict, it might have a 'data' key or be a single point
+                    if 'data' in historical_weather and isinstance(historical_weather['data'], list):
+                        hist_points = historical_weather['data'][-6:]
+                    elif 'historical_weather' in historical_weather and isinstance(historical_weather['historical_weather'], list):
+                        hist_points = historical_weather['historical_weather'][-6:]
+                    else:
+                        # Might be a single weather point
+                        hist_points = [historical_weather] if 'timestamp' in historical_weather else []
+                
+                for point in hist_points:
                     if isinstance(point, dict) and 'timestamp' in point and 'temperature' in point:
                         try:
                             temp = float(point['temperature'])
@@ -653,13 +667,30 @@ class ForecastEngine:
         
         # Add historical data points (past 6 hours)
         if historical_weather:
-            # Handle case where historical_weather might be wrapped in another list
-            if len(historical_weather) == 1 and isinstance(historical_weather[0], list):
-                historical_weather = historical_weather[0]
+            # Handle different formats of historical_weather data
+            hist_data = []
+            if isinstance(historical_weather, list):
+                # Handle case where historical_weather might be wrapped in another list
+                if len(historical_weather) == 1 and isinstance(historical_weather[0], list):
+                    hist_data = historical_weather[0]
+                else:
+                    hist_data = historical_weather
+            elif isinstance(historical_weather, dict):
+                # Handle dictionary format
+                if 'data' in historical_weather and isinstance(historical_weather['data'], list):
+                    hist_data = historical_weather['data']
+                elif 'historical_weather' in historical_weather and isinstance(historical_weather['historical_weather'], list):
+                    hist_data = historical_weather['historical_weather']
+                else:
+                    # Single weather point
+                    hist_data = [historical_weather] if 'timestamp' in historical_weather else []
+            else:
+                logger.warning(f"Unknown historical_weather format: {type(historical_weather)}")
+                hist_data = []
             
-            logger.info(f"Adding {len(historical_weather)} historical weather points")
+            logger.info(f"Adding {len(hist_data)} historical weather points")
             valid_count = 0
-            for hist_point in historical_weather:
+            for hist_point in hist_data:
                 try:
                     # Handle string data (skip invalid entries)
                     if isinstance(hist_point, str):
