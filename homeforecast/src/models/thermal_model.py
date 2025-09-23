@@ -285,7 +285,32 @@ class ThermalModel:
                 return self._get_fallback_trend_analysis()
             
             # Calculate outdoor temperature trend (°F/hour)
-            time_hours = [(ts - timestamps[0]).total_seconds() / 3600 for ts in timestamps]
+            # Normalize timestamps to handle timezone-aware vs naive datetime mixing
+            normalized_timestamps = []
+            reference_ts = timestamps[0]
+            
+            for ts in timestamps:
+                try:
+                    # Convert both timestamps to same timezone awareness
+                    if hasattr(reference_ts, 'tzinfo') and reference_ts.tzinfo is not None:
+                        # Reference is timezone-aware
+                        if hasattr(ts, 'tzinfo') and ts.tzinfo is None:
+                            # Convert naive to UTC
+                            import pytz
+                            ts = pytz.UTC.localize(ts)
+                    else:
+                        # Reference is naive
+                        if hasattr(ts, 'tzinfo') and ts.tzinfo is not None:
+                            # Convert timezone-aware to naive (use local time)
+                            ts = ts.replace(tzinfo=None)
+                    
+                    normalized_timestamps.append(ts)
+                except Exception as e:
+                    logger.debug(f"Timestamp normalization error: {e}")
+                    # Fallback - use timestamp as-is
+                    normalized_timestamps.append(ts)
+            
+            time_hours = [(ts - normalized_timestamps[0]).total_seconds() / 3600 for ts in normalized_timestamps]
             outdoor_trend = np.polyfit(time_hours, outdoor_temps, 1)[0] if len(time_hours) > 1 else 0
             
             # Calculate temperature variation and stability

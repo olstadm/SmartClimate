@@ -1049,16 +1049,44 @@ class HomeAssistantClient:
         """Get cached weather data if recent enough"""
         if not hasattr(self, '_weather_cache') or not self._weather_cache:
             return None
-            
-        cache_age_hours = (datetime.now() - self._weather_cache['timestamp']).total_seconds() / 3600
         
-        # Use cached data if less than 2 hours old
-        if cache_age_hours < 2:
-            logger.info(f"Using weather cache from {cache_age_hours:.1f} hours ago")
-            return self._weather_cache['data'].copy()
-        else:
-            logger.info(f"Weather cache too old ({cache_age_hours:.1f} hours)")
-            return None
+        try:
+            # Handle both dict and list cache formats
+            if isinstance(self._weather_cache, dict) and 'timestamp' in self._weather_cache:
+                # Dict format from _cache_weather_data
+                cache_age_hours = (datetime.now() - self._weather_cache['timestamp']).total_seconds() / 3600
+                
+                # Use cached data if less than 2 hours old
+                if cache_age_hours < 2:
+                    logger.info(f"Using weather cache from {cache_age_hours:.1f} hours ago")
+                    return self._weather_cache['data'].copy()
+                else:
+                    logger.info(f"Weather cache too old ({cache_age_hours:.1f} hours)")
+                    
+            elif isinstance(self._weather_cache, list) and self._weather_cache:
+                # List format from cache_current_weather_data - use most recent
+                recent_entry = max(self._weather_cache, key=lambda x: x.get('timestamp', datetime.min))
+                cache_age_hours = (datetime.now() - recent_entry['timestamp']).total_seconds() / 3600
+                
+                if cache_age_hours < 2:
+                    logger.info(f"Using recent cache entry from {cache_age_hours:.1f} hours ago")
+                    # Convert to expected format
+                    return {
+                        'current_outdoor': {
+                            'temperature': recent_entry.get('outdoor_temp'),
+                            'humidity': recent_entry.get('outdoor_humidity'),
+                            'solar_irradiance': recent_entry.get('solar_irradiance', 0)
+                        }
+                    }
+                else:
+                    logger.info(f"Cache entry too old ({cache_age_hours:.1f} hours)")
+            else:
+                logger.warning(f"Unknown weather cache format: {type(self._weather_cache)}")
+                
+        except Exception as e:
+            logger.warning(f"Error accessing weather cache: {e}")
+            
+        return None
             
     def _estimate_solar_irradiance(self, current_data: Dict) -> float:
         """Estimate solar irradiance from current conditions"""

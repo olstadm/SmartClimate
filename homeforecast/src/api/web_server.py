@@ -113,13 +113,77 @@ def convert_numpy_types(obj):
         return str(obj)
 
 
+def _analyze_hvac_schedule_from_trajectory(trajectory, current_temp, hvac_mode):
+    """Extract HVAC timing insights from forecast trajectory"""
+    insights = {
+        'recommended_action': 'MONITOR',
+        'next_action_time': 'N/A',
+        'action_off_time': 'N/A',
+        'estimated_runtime': 'N/A'
+    }
+    
+    if not trajectory or len(trajectory) < 2:
+        return insights
+    
+    try:
+        now = datetime.now()
+        current_hvac_on = False
+        hvac_start_time = None
+        hvac_end_time = None
+        
+        # Analyze trajectory for HVAC activity patterns
+        for i, point in enumerate(trajectory):
+            hvac_state = point.get('hvac_state', 'idle')
+            timestamp = point.get('timestamp', now)
+            
+            # Check if HVAC is active (heating or cooling)
+            is_active = hvac_state in ['heating', 'cooling', 'heat', 'cool']
+            
+            # Detect HVAC start
+            if is_active and not current_hvac_on:
+                hvac_start_time = timestamp
+                current_hvac_on = True
+                # Determine action type
+                if hvac_state in ['cooling', 'cool']:
+                    insights['recommended_action'] = 'COOL SOON'
+                elif hvac_state in ['heating', 'heat']:
+                    insights['recommended_action'] = 'HEAT SOON'
+                    
+            # Detect HVAC end
+            elif not is_active and current_hvac_on:
+                hvac_end_time = timestamp
+                current_hvac_on = False
+                
+                # Calculate runtime
+                if hvac_start_time:
+                    runtime_hours = (hvac_end_time - hvac_start_time).total_seconds() / 3600
+                    insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
+                    
+                break  # Use first HVAC cycle found
+        
+        # Set times based on findings
+        if hvac_start_time:
+            insights['next_action_time'] = format_time_consistent(hvac_start_time)
+            
+        if hvac_end_time:
+            insights['action_off_time'] = format_time_consistent(hvac_end_time)
+        elif current_hvac_on and hvac_start_time:
+            # Still running at end of forecast
+            insights['action_off_time'] = "Beyond forecast"
+            
+    except Exception as e:
+        logger.warning(f"Error analyzing HVAC schedule: {e}")
+        
+    return insights
+
+
 def calculate_climate_insights(current_data, thermostat_data, config, comfort_analyzer=None):
     """Calculate intelligent climate action insights with HVAC timing predictions"""
     try:
         insights = {
             'recommended_action': 'MONITOR',
-            'action_off_time': 'N/A',
-            'next_action_time': 'N/A',
+            'next_action_time': 'N/A',  # When to turn on
+            'action_off_time': 'N/A',   # When to turn off
             'estimated_runtime': 'N/A'
         }
         
@@ -132,6 +196,28 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
         # Use actual comfort range from config  
         comfort_min = config.get('comfort_min_temp', 62.0)
         comfort_max = config.get('comfort_max_temp', 80.0)
+        
+        # Try to get forecast-based insights from comfort analyzer
+        forecast_insights = None
+        if comfort_analyzer and hasattr(comfort_analyzer, 'homeforecast'):
+            try:
+                # Check if we have recent forecast data stored in comfort analyzer
+                if hasattr(comfort_analyzer, 'latest_forecast_data') and comfort_analyzer.latest_forecast_data:
+                    forecast_data = comfort_analyzer.latest_forecast_data
+                    if 'controlled_trajectory' in forecast_data:
+                        trajectory = forecast_data['controlled_trajectory']
+                        forecast_insights = _analyze_hvac_schedule_from_trajectory(trajectory, current_temp, hvac_mode)
+                        logger.debug(f"Found {len(trajectory)} trajectory points for insights")
+            except Exception as e:
+                logger.debug(f"Could not get forecast insights: {e}")
+        
+        # If we have forecast insights, use them
+        if forecast_insights:
+            insights.update(forecast_insights)
+            logger.info(f"Using forecast-based climate insights: {insights['recommended_action']}")
+        else:
+            # Fallback to current state analysis
+            logger.info("Using current state for climate insights")
         
         # HVAC performance estimates (°F/hour)
         heating_rate = 3.5
@@ -402,7 +488,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '1.8.7',
+                'addon_version': '1.8.8',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -420,7 +506,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '1.8.7',
+                'version': '1.8.8',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
