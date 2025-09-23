@@ -378,6 +378,7 @@ class ThermalModel:
                     'outdoor_warmer_indoor_should_warm': temp_differential > 1.0,
                     'outdoor_cooler_indoor_should_cool': temp_differential < -1.0,
                     'significant_temperature_differential': abs(temp_differential) > 2.0,
+                    'significant_trend_detected': abs(temp_differential) > 2.0 and abs(outdoor_trend) > 0.5,
                     'coupling_factor': thermal_coupling,
                     'temperature_differential': round(temp_differential, 1)
                 },
@@ -438,8 +439,8 @@ class ThermalModel:
         """
         try:
             current_indoor = current_conditions.get('indoor_temp', 70.0)
-            outdoor_trend = trend_analysis['outdoor_trend']['rate_per_hour']
-            expected_response = trend_analysis['expected_indoor_response']['predicted_trend']
+            outdoor_trend = trend_analysis.get('outdoor_trend', {}).get('rate_per_hour', 0.0)
+            expected_response = trend_analysis.get('expected_indoor_response', {}).get('predicted_trend', 0.0)
             
             # Calculate expected change based on trends
             expected_change = expected_response * time_hours
@@ -506,13 +507,17 @@ class ThermalModel:
         error_penalty = min(0.3, trend_error * 0.1)
         
         # Increase confidence for good data quality
-        data_quality = trend_analysis['data_quality']['temperature_reliability']
+        data_quality = trend_analysis.get('data_quality', {}).get('temperature_reliability', 'low')
         quality_bonus = {'high': 0.2, 'medium': 0.1, 'low': 0.0}.get(data_quality, 0.0)
         
         # Adjust for trend strength
-        if trend_analysis['trend_validation']['significant_trend_detected']:
-            trend_bonus = 0.1
-        else:
+        try:
+            if trend_analysis.get('trend_validation', {}).get('significant_trend_detected', False):
+                trend_bonus = 0.1
+            else:
+                trend_bonus = 0.0
+        except (KeyError, TypeError):
+            logger.debug("Missing trend validation data, using default trend bonus")
             trend_bonus = 0.0
             
         confidence = base_confidence - error_penalty + quality_bonus + trend_bonus

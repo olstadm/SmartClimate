@@ -400,7 +400,7 @@ class EnhancedTrainingSystem:
             
         output_data = {
             'timestamp': datetime.now().isoformat(),
-            'version': '2.0.0',
+            'version': '2.0.1',
             'building_model': self.building_model,
             'weather_dataset_info': {
                 'location': self.weather_dataset.get('location', {}),
