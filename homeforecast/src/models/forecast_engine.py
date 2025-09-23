@@ -223,7 +223,12 @@ class ForecastEngine:
                 logger.info(f"📊 Separating {current_time_index} historical points from {len(controlled_trajectory) - current_time_index} forecast points")
                 
                 # Get actual historical sensor data from data store
-                actual_historical_data = await self._get_historical_sensor_data(timestamps[:current_time_index])
+                try:
+                    actual_historical_data = await self._get_historical_sensor_data(timestamps[:current_time_index])
+                    logger.info(f"✅ Retrieved historical sensor data with {len(actual_historical_data.get('outdoor_temps', []))} outdoor temp points")
+                except Exception as e:
+                    logger.warning(f"⚠️ Historical sensor data retrieval failed, using forecast data as fallback: {e}")
+                    actual_historical_data = {'outdoor_temps': [], 'indoor_temps': [], 'hvac_states': []}
                 
                 # Historical Hours (Previous 6 hours) - ACTUAL DATA FROM SENSORS
                 historical_data = {
@@ -232,6 +237,7 @@ class ForecastEngine:
                     'actual_indoor_temp': actual_historical_data.get('indoor_temps', [step['indoor_temp'] for step in controlled_trajectory[:current_time_index]]),
                     'actual_hvac_mode': actual_historical_data.get('hvac_states', [step['hvac_state'] for step in controlled_trajectory[:current_time_index]]),
                 }
+                logger.info(f"✅ Created historical_data with {len(historical_data['timestamps'])} timestamps")
                 
                 # Forecast Hours (Next 12 hours) - PREDICTIONS
                 forecast_data = {
@@ -241,8 +247,10 @@ class ForecastEngine:
                     'projected_indoor_no_hvac': [step['indoor_temp'] for step in idle_trajectory[current_time_index:]],  # Without climate control
                     'projected_hvac_mode': [step['hvac_state'] for step in controlled_trajectory[current_time_index:]],  # Predicted HVAC state
                 }
+                logger.info(f"✅ Created forecast_data with {len(forecast_data['timestamps'])} timestamps")
             else:
                 # No historical data - everything is forecast
+                logger.warning(f"⚠️ NO HISTORICAL DATA: current_time_index={current_time_index}, treating all {len(timestamps)} points as forecast")
                 forecast_data = {
                     'timestamps': timestamps,
                     'forecasted_outdoor_temp': [step['outdoor_temp'] for step in outdoor_series],
