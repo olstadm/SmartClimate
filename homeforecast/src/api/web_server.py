@@ -16,6 +16,12 @@ try:
 except ImportError:
     HAS_NUMPY = False
 
+try:
+    import pytz
+    HAS_PYTZ = True
+except ImportError:
+    HAS_PYTZ = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,6 +40,69 @@ def format_time_consistent(dt, include_seconds=False) -> str:
             return dt.strftime("%#I:%M %p")
         else:
             return dt.strftime("%-I:%M %p")
+
+
+def convert_timestamps_to_local_timezone(data, target_timezone='America/Los_Angeles'):
+    """Convert UTC timestamps in forecast data to local timezone for frontend display"""
+    if not HAS_PYTZ:
+        logger.warning("pytz not available for timezone conversion, returning data as-is")
+        return data
+        
+    try:
+        # Get target timezone
+        if target_timezone and target_timezone != 'UTC':
+            target_tz = pytz.timezone(target_timezone)
+        else:
+            target_tz = pytz.UTC
+            
+        def convert_timestamp_list(timestamps):
+            """Convert a list of timestamp strings to local timezone"""
+            converted = []
+            for ts in timestamps:
+                if isinstance(ts, str):
+                    try:
+                        # Parse the timestamp
+                        if ts.endswith('Z'):
+                            dt = datetime.fromisoformat(ts[:-1]).replace(tzinfo=pytz.UTC)
+                        elif '+' in ts or ts.count('-') > 2:  # Has timezone info
+                            dt = datetime.fromisoformat(ts)
+                            if dt.tzinfo is None:
+                                dt = dt.replace(tzinfo=pytz.UTC)
+                        else:
+                            # Assume UTC if no timezone info
+                            dt = datetime.fromisoformat(ts).replace(tzinfo=pytz.UTC)
+                        
+                        # Convert to target timezone and format for frontend
+                        local_dt = dt.astimezone(target_tz)
+                        # Return in ISO format but without timezone info for JavaScript
+                        converted.append(local_dt.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3])
+                        
+                    except Exception as e:
+                        logger.warning(f"Could not convert timestamp {ts}: {e}")
+                        converted.append(ts)  # Keep original if conversion fails
+                else:
+                    converted.append(ts)
+            return converted
+        
+        # Convert timestamps in the data structure
+        if isinstance(data, dict):
+            result = {}
+            for key, value in data.items():
+                if key == 'timestamps' and isinstance(value, list):
+                    result[key] = convert_timestamp_list(value)
+                elif isinstance(value, dict):
+                    result[key] = convert_timestamps_to_local_timezone(value, target_timezone)
+                elif isinstance(value, list) and key in ['timestamps']:
+                    result[key] = convert_timestamp_list(value)
+                else:
+                    result[key] = value
+            return result
+        else:
+            return data
+            
+    except Exception as e:
+        logger.warning(f"Timezone conversion failed: {e}")
+        return data
 
 
 def convert_numpy_types(obj):
@@ -576,7 +645,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '1.8.23',
+                'addon_version': '1.8.24',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -613,7 +682,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '1.8.23',
+                'version': '1.8.24',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
@@ -781,6 +850,23 @@ def create_app(homeforecast_instance):
                     
                 except Exception as e:
                     logger.warning(f"Failed to add timezone debug info: {e}")
+                
+                # Convert timestamps to local timezone for proper chart display
+                try:
+                    # Get the Home Assistant timezone from ha_client
+                    target_timezone = 'America/Los_Angeles'  # Default fallback
+                    if hasattr(app.homeforecast, 'ha_client') and hasattr(app.homeforecast.ha_client, 'timezone'):
+                        target_timezone = str(app.homeforecast.ha_client.timezone)
+                    
+                    logger.info(f"Converting timestamps to local timezone: {target_timezone}")
+                    
+                    # Convert timestamps in forecast data
+                    if 'data' in forecast:
+                        forecast['data'] = convert_timestamps_to_local_timezone(forecast['data'], target_timezone)
+                        logger.info("✅ Timestamps converted to local timezone for frontend display")
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to convert timestamps to local timezone: {e}")
                 
                 # Convert all data to JSON-serializable types
                 forecast = convert_numpy_types(forecast)
