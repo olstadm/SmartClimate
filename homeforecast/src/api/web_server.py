@@ -488,7 +488,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '1.8.10',
+                'addon_version': '1.8.11',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -506,7 +506,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '1.8.10',
+                'version': '1.8.11',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
@@ -786,6 +786,115 @@ def create_app(homeforecast_instance):
         except Exception as e:
             logger.error(f"Error resetting model: {e}")
             return jsonify({'error': str(e)}), 500
+    
+    @app.route('/api/ml/training-info')
+    def get_ml_training_info():
+        """Get ML training information for confirmation dialog"""
+        try:
+            ml_corrector = getattr(app.homeforecast.thermal_model, 'ml_corrector', None)
+            
+            # Get available training data count
+            data_points = 0
+            try:
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    training_data = loop.run_until_complete(
+                        app.homeforecast.data_store.get_training_data(30)
+                    )
+                    data_points = len(training_data) if training_data else 0
+                finally:
+                    loop.close()
+            except Exception as e:
+                logger.warning(f"Could not fetch training data count: {e}")
+                data_points = 0
+            
+            # Estimate duration based on data size
+            if data_points < 100:
+                estimated_duration = "Insufficient data (need 100+ points)"
+                training_possible = False
+            elif data_points < 1000:
+                estimated_duration = "5-10 seconds"
+                training_possible = True
+            else:
+                estimated_duration = "10-30 seconds"
+                training_possible = True
+            
+            return jsonify({
+                'model_type': app.homeforecast.config.get('ml_model_type', 'Random Forest'),
+                'data_points': data_points,
+                'training_period': f"{app.homeforecast.config.get('ml_training_days', 30)} days",
+                'estimated_duration': estimated_duration,
+                'training_possible': training_possible,
+                'current_status': 'Trained' if (ml_corrector and ml_corrector.is_trained) else 'Not Trained'
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting ML training info: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    @app.route('/api/ml/train', methods=['POST'])
+    def train_ml_model():
+        """Manually trigger ML model training"""
+        try:
+            logger.info("🎯 Manual ML model training requested via web UI")
+            
+            # Check if ML correction is enabled
+            if not app.homeforecast.config.get('enable_ml_correction', False):
+                return jsonify({
+                    'success': False,
+                    'error': 'ML correction is disabled in configuration'
+                }), 400
+            
+            # Check if ML corrector exists
+            ml_corrector = getattr(app.homeforecast.thermal_model, 'ml_corrector', None)
+            if not ml_corrector:
+                return jsonify({
+                    'success': False,
+                    'error': 'ML corrector not available'
+                }), 400
+            
+            # Trigger training
+            logger.info("🚀 Starting manual ML model training...")
+            import asyncio
+            
+            # Run the training
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(ml_corrector.retrain())
+            finally:
+                loop.close()
+            
+            # Check if training was successful
+            if ml_corrector.is_trained and ml_corrector.performance_history:
+                latest_performance = ml_corrector.performance_history[-1]
+                logger.info("✅ Manual ML model training completed successfully")
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'ML model trained successfully',
+                    'metrics': {
+                        'r2': latest_performance.get('r2'),
+                        'mse': latest_performance.get('mse'),
+                        'mae': latest_performance.get('mae'),
+                        'training_samples': latest_performance.get('training_samples'),
+                        'training_duration': latest_performance.get('training_duration')
+                    }
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Training completed but model is not in trained state. Check logs for details.'
+                }), 500
+                
+        except Exception as e:
+            logger.error(f"❌ Error training ML model: {e}", exc_info=True)
+            return jsonify({
+                'success': False,
+                'error': f'Training failed: {str(e)}'
+            }), 500
             
     # Web UI Routes
     

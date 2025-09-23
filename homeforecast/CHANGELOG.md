@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.11] - 2025-09-23
+
+### Added
+- **Manual ML Training Interface**: Added "Train ML Model" button to web UI
+- Interactive confirmation dialog with training details:
+  * Model type (Random Forest/Gradient Boosting)
+  * Available training data points
+  * Training period (30 days default)
+  * Estimated training duration
+- Real-time training progress indicators and success/error notifications
+- Keyboard shortcuts: ESC key closes training dialog
+- Click-outside-to-close modal functionality
+
+### Enhanced
+- **API Endpoints**: New `/api/ml/training-info` and `/api/ml/train` endpoints
+- Training information pre-validation before starting training process
+- Comprehensive error handling with user-friendly error messages
+- Training success feedback with performance metrics (R², MSE, MAE)
+- Automatic dashboard refresh after successful training
+
+### User Experience
+- Confirmation dialog prevents accidental training triggers
+- Loading states and progress indicators during training
+- Clear status messages throughout training process
+- Modal interface with professional styling and animations
+
 ## [1.8.10] - 2025-09-23
 
 ### Fixed

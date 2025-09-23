@@ -227,6 +227,13 @@
                         <span class="metric-label">Last Model Update:</span>
                         <span class="metric-value" id="lastModelUpdate">-</span>
                     </div>
+                    
+                    <button class="btn btn-primary" onclick="dashboard.showMLTrainingDialog()" style="margin-top: 15px;">
+                        <svg class="icon" style="margin-right: 5px;" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3z"/>
+                        </svg>
+                        Train ML Model
+                    </button>
                 </div>
             </div>
         </div>
@@ -298,6 +305,46 @@
                         This will clear all historical data and restart model training
                     </p>
                 </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- ML Training Confirmation Dialog -->
+    <div id="mlTrainingModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Train Machine Learning Model</h3>
+                <span class="close" onclick="dashboard.hideMLTrainingDialog()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to train the Machine Learning model?</p>
+                
+                <div class="training-info">
+                    <div class="info-row">
+                        <strong>Model Type:</strong> <span id="modalModelType">-</span>
+                    </div>
+                    <div class="info-row">
+                        <strong>Training Data Points:</strong> <span id="modalDataPoints">-</span>
+                    </div>
+                    <div class="info-row">
+                        <strong>Training Period:</strong> <span id="modalTrainingPeriod">-</span>
+                    </div>
+                    <div class="info-row">
+                        <strong>Estimated Duration:</strong> <span id="modalEstimatedDuration">-</span>
+                    </div>
+                </div>
+                
+                <div class="warning-box">
+                    <strong>⚠️ Note:</strong> Training will temporarily use system resources and may take several seconds to complete.
+                    The model will be automatically saved after successful training.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="dashboard.hideMLTrainingDialog()">Cancel</button>
+                <button class="btn btn-primary" onclick="dashboard.confirmMLTraining()" id="confirmTrainBtn">
+                    <span class="btn-text">Start Training</span>
+                    <span class="spinner" style="display: none;">Training...</span>
+                </button>
             </div>
         </div>
     </div>

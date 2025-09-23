@@ -36,6 +36,26 @@ class HomeForecastDashboard {
         if (settingsForm) {
             settingsForm.addEventListener('submit', (e) => this.saveSettings(e));
         }
+
+        // ML Training Modal - close when clicking outside
+        const modal = document.getElementById('mlTrainingModal');
+        if (modal) {
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    this.hideMLTrainingDialog();
+                }
+            });
+        }
+
+        // Close modal with Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                const modal = document.getElementById('mlTrainingModal');
+                if (modal && modal.style.display === 'block') {
+                    this.hideMLTrainingDialog();
+                }
+            }
+        });
     }
 
     async loadAllData() {
@@ -1173,6 +1193,77 @@ class HomeForecastDashboard {
     exportData() {
         // Placeholder for data export functionality
         this.showNotification('Export functionality coming soon...', 'info');
+    }
+
+    async showMLTrainingDialog() {
+        try {
+            // Fetch current ML training info
+            const response = await fetch('/api/ml/training-info');
+            const info = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(info.error || 'Failed to fetch training info');
+            }
+            
+            // Populate modal with training information
+            document.getElementById('modalModelType').textContent = info.model_type || 'Random Forest';
+            document.getElementById('modalDataPoints').textContent = info.data_points || '0';
+            document.getElementById('modalTrainingPeriod').textContent = info.training_period || '30 days';
+            document.getElementById('modalEstimatedDuration').textContent = info.estimated_duration || '5-15 seconds';
+            
+            // Show the modal
+            document.getElementById('mlTrainingModal').style.display = 'block';
+        } catch (error) {
+            this.showNotification('Failed to load training info: ' + error.message, 'error');
+        }
+    }
+
+    hideMLTrainingDialog() {
+        document.getElementById('mlTrainingModal').style.display = 'none';
+    }
+
+    async confirmMLTraining() {
+        const confirmBtn = document.getElementById('confirmTrainBtn');
+        const btnText = confirmBtn.querySelector('.btn-text');
+        const spinner = confirmBtn.querySelector('.spinner');
+        
+        try {
+            // Show loading state
+            confirmBtn.disabled = true;
+            btnText.style.display = 'none';
+            spinner.style.display = 'inline';
+            
+            this.showNotification('Starting ML model training...', 'info');
+            
+            const response = await fetch('/api/ml/train', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const result = await response.json();
+            
+            if (response.ok && result.success) {
+                this.showNotification('ML model trained successfully! ' + 
+                    (result.metrics ? `R² Score: ${result.metrics.r2?.toFixed(3)}` : ''), 'success');
+                
+                // Hide modal and refresh data
+                this.hideMLTrainingDialog();
+                setTimeout(() => {
+                    this.loadAllData();
+                }, 1000);
+            } else {
+                throw new Error(result.error || 'Training failed');
+            }
+        } catch (error) {
+            this.showNotification('Failed to train ML model: ' + error.message, 'error');
+        } finally {
+            // Reset button state
+            confirmBtn.disabled = false;
+            btnText.style.display = 'inline';
+            spinner.style.display = 'none';
+        }
     }
 
     startAutoRefresh() {
