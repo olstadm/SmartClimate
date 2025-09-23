@@ -996,53 +996,105 @@ class HomeForecastDashboard {
     }
 
     extractHvacPeriods(data) {
-        if (!data.controlled_trajectory || data.controlled_trajectory.length === 0) {
-            return [];
-        }
-
         const periods = [];
         let currentPeriod = null;
         
-        data.controlled_trajectory.forEach((point, index) => {
-            const hvacState = point.hvac_state || 'off';
-            const timestamp = data.timestamps[index];
-            const timeStr = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: true});
+        // === HISTORICAL SECTION: Use actual HVAC mode data ===
+        if (data.historical_data && data.historical_data.actual_hvac_mode && data.historical_data.actual_hvac_mode.length > 0) {
+            console.log('Processing historical HVAC periods from actual_hvac_mode data');
             
-            if (hvacState !== 'off') {
-                if (!currentPeriod || currentPeriod.mode !== hvacState) {
-                    // Start new period
+            data.historical_data.actual_hvac_mode.forEach((hvacState, index) => {
+                const timestamp = data.historical_data.timestamps[index];
+                const timeStr = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: true});
+                
+                // Only highlight when HVAC was actually running (not just set to a mode)
+                if (hvacState === 'cooling' || hvacState === 'heating') {
+                    if (!currentPeriod || currentPeriod.mode !== hvacState) {
+                        // Start new historical period
+                        if (currentPeriod) {
+                            periods.push(currentPeriod);
+                        }
+                        
+                        currentPeriod = {
+                            mode: hvacState,
+                            startIndex: index,
+                            startTime: timeStr,
+                            endIndex: index,
+                            endTime: timeStr,
+                            section: 'historical',
+                            color: hvacState === 'heating' ? 'rgba(255, 87, 34, 0.2)' : 'rgba(33, 150, 243, 0.2)',
+                            borderColor: hvacState === 'heating' ? 'rgba(255, 87, 34, 0.8)' : 'rgba(33, 150, 243, 0.8)'
+                        };
+                    } else {
+                        // Continue current period
+                        currentPeriod.endIndex = index;
+                        currentPeriod.endTime = timeStr;
+                    }
+                } else {
+                    // End current historical period
                     if (currentPeriod) {
                         periods.push(currentPeriod);
+                        currentPeriod = null;
                     }
-                    
-                    currentPeriod = {
-                        mode: hvacState,
-                        startIndex: index,
-                        startTime: timeStr,
-                        endIndex: index,
-                        endTime: timeStr,
-                        color: hvacState === 'heat' ? 'rgba(255, 87, 34, 0.2)' : 'rgba(33, 150, 243, 0.2)',
-                        borderColor: hvacState === 'heat' ? 'rgba(255, 87, 34, 0.8)' : 'rgba(33, 150, 243, 0.8)'
-                    };
-                } else {
-                    // Continue current period
-                    currentPeriod.endIndex = index;
-                    currentPeriod.endTime = timeStr;
                 }
-            } else {
-                // End current period
-                if (currentPeriod) {
-                    periods.push(currentPeriod);
-                    currentPeriod = null;
-                }
+            });
+            
+            // Close any ongoing historical period
+            if (currentPeriod) {
+                periods.push(currentPeriod);
+                currentPeriod = null;
             }
-        });
+        }
         
-        // Don't forget the last period
+        // === FORECAST SECTION: Use predicted HVAC operation ===
+        if (data.forecast_data && data.forecast_data.projected_hvac_mode && data.forecast_data.projected_hvac_mode.length > 0) {
+            console.log('Processing forecast HVAC periods from projected_hvac_mode data');
+            
+            const historicalLength = data.historical_data ? (data.historical_data.timestamps || []).length : 0;
+            
+            data.forecast_data.projected_hvac_mode.forEach((hvacState, index) => {
+                const timestamp = data.forecast_data.timestamps[index];
+                const timeStr = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: true});
+                const adjustedIndex = historicalLength + index; // Adjust for combined timeline
+                
+                if (hvacState !== 'off' && hvacState !== 'idle' && hvacState !== 'unknown') {
+                    if (!currentPeriod || currentPeriod.mode !== hvacState) {
+                        // Start new forecast period
+                        if (currentPeriod) {
+                            periods.push(currentPeriod);
+                        }
+                        
+                        currentPeriod = {
+                            mode: hvacState,
+                            startIndex: adjustedIndex,
+                            startTime: timeStr,
+                            endIndex: adjustedIndex,
+                            endTime: timeStr,
+                            section: 'forecast',
+                            color: hvacState === 'heat' ? 'rgba(255, 87, 34, 0.2)' : 'rgba(33, 150, 243, 0.2)',
+                            borderColor: hvacState === 'heat' ? 'rgba(255, 87, 34, 0.8)' : 'rgba(33, 150, 243, 0.8)'
+                        };
+                    } else {
+                        // Continue current period
+                        currentPeriod.endIndex = adjustedIndex;
+                        currentPeriod.endTime = timeStr;
+                    }
+                } else {
+                    // End current forecast period
+                    if (currentPeriod) {
+                        periods.push(currentPeriod);
+                        currentPeriod = null;
+                    }
+                }
+            });
+        }
+        
+        // Close any ongoing period
         if (currentPeriod) {
             periods.push(currentPeriod);
         }
         
+        console.log(`Extracted ${periods.length} HVAC periods:`, periods);
         return periods;
     }
 

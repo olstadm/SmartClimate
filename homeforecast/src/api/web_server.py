@@ -195,17 +195,24 @@ def _analyze_hvac_schedule_from_trajectory(trajectory, current_temp, hvac_mode):
         return insights
     
     try:
-        now = datetime.now()
+        # Use timezone-aware datetime to match trajectory timestamps
+        if HAS_PYTZ:
+            pacific_tz = pytz.timezone('America/Los_Angeles')
+            now = datetime.now(pacific_tz)
+        else:
+            now = datetime.now()
+            
         current_hvac_on = False
         hvac_start_time = None
         hvac_end_time = None
         
         # Analyze trajectory for HVAC activity patterns
+        # Note: trajectory contains forecast projections based on hvac_mode settings
         for i, point in enumerate(trajectory):
             hvac_state = point.get('hvac_state', 'idle')
             timestamp = point.get('timestamp', now)
             
-            # Check if HVAC is active (heating or cooling)
+            # Check if HVAC is active (heating or cooling) - forecast prediction
             is_active = hvac_state in ['heating', 'cooling', 'heat', 'cool']
             
             # Detect HVAC start
@@ -318,14 +325,36 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
         logger.info(f"Climate insights calculation - Current: {current_temp}°F, Target: {target_temp}°F, " +
                    f"Mode: {hvac_mode}, Action: {hvac_action}, Comfort: {comfort_min}-{comfort_max}°F")
         
-        now = datetime.now()
+        # Use timezone-aware datetime to match trajectory timestamps (PDT/PST)
+        if HAS_PYTZ:
+            pacific_tz = pytz.timezone('America/Los_Angeles')
+            now = datetime.now(pacific_tz)
+            logger.debug(f"Using Pacific timezone: {now} (PDT/PST)")
+        else:
+            now = datetime.now()
+            logger.warning("pytz not available, using naive datetime - runtime calculations may be inaccurate")
         
-        # Context-aware insights: Only show relevant timing based on current HVAC state
-        is_currently_heating = hvac_heating or hvac_action in ['heating', 'heat'] or (hvac_mode == 'heat' and hvac_action != 'idle')
-        is_currently_cooling = hvac_cooling or hvac_action in ['cooling', 'cool'] or (hvac_mode == 'cool' and hvac_action != 'idle')
+        # Context-aware insights: Focus on hvac_mode (what we control) rather than hvac_action (what system does)
+        # Priority: Mode settings > Physical heating/cooling flags > Action status
+        is_currently_heating = hvac_mode == 'heat' or (hvac_heating and hvac_mode != 'cool') or (hvac_action in ['heating', 'heat'] and hvac_mode != 'cool')
+        is_currently_cooling = hvac_mode == 'cool' or (hvac_cooling and hvac_mode != 'heat') or (hvac_action in ['cooling', 'cool'] and hvac_mode != 'heat')
         
-        logger.info(f"HVAC Context - Currently heating: {is_currently_heating}, Currently cooling: {is_currently_cooling}, " +
-                   f"HVAC flags - Heat: {hvac_heating}, Cool: {hvac_cooling}, Action: {hvac_action}")
+        logger.info(f"HVAC Context - Mode: {hvac_mode} (what we control), Action: {hvac_action} (what system does)")
+        logger.info(f"Physical State - Heating flag: {hvac_heating}, Cooling flag: {hvac_cooling}")
+        logger.info(f"Decision Logic - Currently heating: {is_currently_heating}, Currently cooling: {is_currently_cooling}")
+        
+        # Mode-focused insights: Provide recommendations based on what user can control (hvac_mode)
+        mode_recommendation = ""
+        if hvac_mode == 'heat':
+            mode_recommendation = "System set to HEAT mode - will heat when needed"
+        elif hvac_mode == 'cool': 
+            mode_recommendation = "System set to COOL mode - will cool when needed"
+        elif hvac_mode == 'auto':
+            mode_recommendation = "System set to AUTO mode - will heat/cool as needed"
+        elif hvac_mode == 'off':
+            mode_recommendation = "System is OFF - no heating or cooling"
+        
+        logger.info(f"Mode Analysis: {mode_recommendation}")
         
         # HVAC is actively heating
         if is_currently_heating:
@@ -409,10 +438,17 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
                     insights['action_off_time'] = 'After cooling completes'
                 
                 else:
-                    insights['recommended_action'] = 'OFF'
-                    insights['action_off_time'] = 'N/A (Currently off)'
+                    # Mode-focused recommendations
+                    if hvac_mode == 'off':
+                        insights['recommended_action'] = 'SYSTEM OFF'
+                        insights['action_off_time'] = 'N/A (Mode set to OFF)'
+                        insights['next_action_time'] = 'Switch mode to HEAT/COOL'
+                        insights['estimated_runtime'] = 'N/A (OFF Mode)'
+                    else:
+                        insights['recommended_action'] = 'MONITOR'
+                        insights['action_off_time'] = 'N/A (Currently idle)'
                     
-                    # Predict when action will be needed based on setpoint and mode
+                    # Predict when action will be needed based on setpoint and mode (only if not OFF)
                     if hvac_mode == 'cool':
                         # Cooling mode - predict when temp will rise above setpoint + deadband
                         temp_prediction = current_temp
@@ -645,7 +681,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '1.8.30',
+                'addon_version': '1.9.0',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -682,7 +718,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '1.8.30',
+                'version': '1.9.0',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
