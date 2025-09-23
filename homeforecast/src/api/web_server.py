@@ -213,9 +213,11 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
         logger.info(f"🌡️ Climate Context: Temp={current_temp}°F, Target={target_temp}°F, Mode={hvac_mode}, " +
                    f"Action={hvac_action}, State={hvac_state}, Heating={hvac_heating}, Cooling={hvac_cooling}")
         
-        # Use actual comfort range from config  
+        # Use actual comfort range from config (62-80°F full band)
         comfort_min = config.get('comfort_min_temp', 62.0)
         comfort_max = config.get('comfort_max_temp', 80.0)
+        
+        logger.info(f"📊 Using comfort band: {comfort_min}°F - {comfort_max}°F (target setpoint: {target_temp}°F)")
         
         # Try to get forecast-based insights from comfort analyzer
         forecast_insights = None
@@ -574,7 +576,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '1.8.15',
+                'addon_version': '1.8.16',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -592,7 +594,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '1.8.15',
+                'version': '1.8.16',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),

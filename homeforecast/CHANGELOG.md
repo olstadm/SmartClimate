@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.16] - 2025-09-23
+
+### Major Chart & Control Logic Overhaul
+- **Full Comfort Band Operation**: Now uses complete 62-80°F comfort range instead of centering on setpoint
+- **Proper Historical/Forecast Chart Structure**: Restructured chart data for clear separation:
+  
+  **Historical Hours (Previous 6 hours):**
+  - Projected Outdoor Temperature (historical weather data)
+  - Actual Outdoor Temperature 
+  - Actual Indoor Temperature
+  - Actual HVAC Mode
+
+  **Forecasted Hours (Next 12 hours):**
+  - Forecasted Outdoor Temperature
+  - Projected Indoor Temperature w/ Climate Control Running
+  - Projected Indoor Temperature w/o Climate Control Running
+  - Projected HVAC Mode
+
+- **Enhanced HVAC Control Logic**: 
+  - Heat when approaching 63°F (comfort_min + 1°F)
+  - Cool when approaching 79°F (comfort_max - 1°F) 
+  - Respects full comfort band for energy efficiency
+  - No more predictions in historical 6-hour window
+
+### Fixed
+- **Comfort Band Usage**: System now properly uses 62-80°F range instead of tight setpoint control
+- **Historical Data Contamination**: Eliminated predictions appearing in past 6-hour timeline
+- **Energy Efficiency**: HVAC operates across comfort band rather than constantly targeting single setpoint
+
 ## [1.8.15] - 2025-09-23
 
 ### Enhanced Data Visualization & Accuracy

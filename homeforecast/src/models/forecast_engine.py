@@ -62,35 +62,18 @@ class ForecastEngine:
             logger.info(f"Current outdoor temp: {current_data.get('outdoor_temp')}°F")
             logger.info(f"Weather forecast keys: {list(weather_forecast.keys())}")
             
-            # Extract thermostat setpoint and update control parameters
+            # Store thermostat setpoint for HVAC control but keep comfort band for efficiency
+            self.current_setpoint = None
+            self.current_hvac_mode = 'off'
+            
             if thermostat_data:
-                target_temp = thermostat_data.get('target_temperature')
-                hvac_mode = thermostat_data.get('hvac_mode', 'off')
-                logger.info(f"🎯 Using thermostat setpoint: {target_temp}°F, Mode: {hvac_mode}")
+                self.current_setpoint = thermostat_data.get('target_temperature')
+                self.current_hvac_mode = thermostat_data.get('hvac_mode', 'off')
+                logger.info(f"🎯 Thermostat: {self.current_setpoint}°F setpoint, Mode: {self.current_hvac_mode}")
                 
-                # Update comfort ranges based on thermostat setpoint (convert to F if needed)
-                if target_temp is not None:
-                    # Allow 5% tolerance around setpoint as mentioned by user
-                    tolerance = target_temp * 0.05  # 5% of setpoint
-                    tolerance = max(tolerance, 1.0)  # At least 1°F tolerance
-                    tolerance = min(tolerance, 3.0)  # But not more than 3°F
-                    
-                    # For heating modes, maintain temperature around setpoint
-                    if hvac_mode in ['heat', 'heat_cool', 'auto']:
-                        self.comfort_min = target_temp - tolerance
-                        self.comfort_max = target_temp + tolerance
-                    # For cooling modes, maintain temperature around setpoint  
-                    elif hvac_mode == 'cool':
-                        self.comfort_min = target_temp - tolerance
-                        self.comfort_max = target_temp + tolerance
-                    else:
-                        # HVAC off - use wider comfort range around setpoint
-                        self.comfort_min = target_temp - 2.0
-                        self.comfort_max = target_temp + 2.0
-                        
-                    logger.info(f"📊 Updated comfort range: {self.comfort_min:.1f}°F - {self.comfort_max:.1f}°F (±{tolerance:.1f}°F from {target_temp}°F setpoint)")
-                else:
-                    logger.warning("⚠️ No target temperature found in thermostat data, using config defaults")
+                # Keep the full comfort band (62-80°F) for efficient operation
+                # Don't override with setpoint - use comfort band for smart control
+                logger.info(f"📊 Using full comfort band: {self.comfort_min:.1f}°F - {self.comfort_max:.1f}°F (setpoint: {self.current_setpoint}°F)")
             else:
                 logger.warning("⚠️ No thermostat data provided, using config defaults")
             
@@ -232,37 +215,38 @@ class ForecastEngine:
             if controlled_trajectory:
                 logger.info(f"  - Controlled temp range: {min(s['indoor_temp'] for s in controlled_trajectory):.1f}°F - {max(s['indoor_temp'] for s in controlled_trajectory):.1f}°F")
             
-            # Separate historical from forecast data
+            # Separate historical actual data from forecast predictions
             historical_data = {}
-            forecast_only_data = {}
+            forecast_data = {}
             
             if current_time_index is not None and current_time_index > 0:
                 logger.info(f"📊 Separating {current_time_index} historical points from {len(controlled_trajectory) - current_time_index} forecast points")
                 
+                # Historical Hours (Previous 6 hours) - ACTUAL DATA
                 historical_data = {
                     'timestamps': timestamps[:current_time_index],
-                    'outdoor_temps': [step['outdoor_temp'] for step in outdoor_series[:current_time_index]],
-                    'outdoor_humidity': [step['outdoor_humidity'] for step in outdoor_series[:current_time_index]],
-                    'solar_irradiance': [step['solar_irradiance'] for step in outdoor_series[:current_time_index]],
+                    'projected_outdoor_temp': [step['outdoor_temp'] for step in outdoor_series[:current_time_index]],  # This is actually historical
+                    'actual_outdoor_temp': [step['outdoor_temp'] for step in outdoor_series[:current_time_index]],  # Same for now, could be enhanced
+                    'actual_indoor_temp': [step['indoor_temp'] for step in controlled_trajectory[:current_time_index]],  # From sensors
+                    'actual_hvac_mode': [step['hvac_state'] for step in controlled_trajectory[:current_time_index]],  # Historical HVAC state
                 }
                 
-                forecast_only_data = {
+                # Forecast Hours (Next 12 hours) - PREDICTIONS
+                forecast_data = {
                     'timestamps': timestamps[current_time_index:],
-                    'indoor_forecast': [step['indoor_temp'] for step in controlled_trajectory[current_time_index:]],
-                    'idle_forecast': [step['indoor_temp'] for step in idle_trajectory[current_time_index:]],
-                    'outdoor_forecast': [step['outdoor_temp'] for step in outdoor_series[current_time_index:]],
-                    'outdoor_humidity_forecast': [step['outdoor_humidity'] for step in outdoor_series[current_time_index:]],
-                    'solar_forecast': [step['solar_irradiance'] for step in outdoor_series[current_time_index:]],
+                    'forecasted_outdoor_temp': [step['outdoor_temp'] for step in outdoor_series[current_time_index:]],
+                    'projected_indoor_with_hvac': [step['indoor_temp'] for step in controlled_trajectory[current_time_index:]],  # With climate control
+                    'projected_indoor_no_hvac': [step['indoor_temp'] for step in idle_trajectory[current_time_index:]],  # Without climate control
+                    'projected_hvac_mode': [step['hvac_state'] for step in controlled_trajectory[current_time_index:]],  # Predicted HVAC state
                 }
             else:
                 # No historical data - everything is forecast
-                forecast_only_data = {
+                forecast_data = {
                     'timestamps': timestamps,
-                    'indoor_forecast': [step['indoor_temp'] for step in controlled_trajectory],
-                    'idle_forecast': [step['indoor_temp'] for step in idle_trajectory],
-                    'outdoor_forecast': [step['outdoor_temp'] for step in outdoor_series],
-                    'outdoor_humidity_forecast': [step['outdoor_humidity'] for step in outdoor_series],
-                    'solar_forecast': [step['solar_irradiance'] for step in outdoor_series],
+                    'forecasted_outdoor_temp': [step['outdoor_temp'] for step in outdoor_series],
+                    'projected_indoor_with_hvac': [step['indoor_temp'] for step in controlled_trajectory],
+                    'projected_indoor_no_hvac': [step['indoor_temp'] for step in idle_trajectory],
+                    'projected_hvac_mode': [step['hvac_state'] for step in controlled_trajectory],
                 }
 
             result = {
@@ -276,12 +260,13 @@ class ForecastEngine:
                 
                 # Separated data (for UI rendering)
                 'historical_data': historical_data,
-                'forecast_only_data': forecast_only_data,
+                'forecast_data': forecast_data,
                 
-                # Legacy format (for backward compatibility)
+                # Legacy format (for backward compatibility) - use forecast portion only
                 'timestamps': timestamps,
-                'outdoor_forecast': [step['outdoor_temp'] for step in outdoor_series],
-                'indoor_forecast': [step['indoor_temp'] for step in controlled_trajectory],
+                'outdoor_forecast': forecast_data.get('forecasted_outdoor_temp', [step['outdoor_temp'] for step in outdoor_series]),
+                'indoor_forecast': forecast_data.get('projected_indoor_with_hvac', [step['indoor_temp'] for step in controlled_trajectory]),
+                'idle_forecast': forecast_data.get('projected_indoor_no_hvac', [step['indoor_temp'] for step in idle_trajectory]),
                 
                 # Additional data
                 'current_time_index': current_time_index,
@@ -460,23 +445,18 @@ class ForecastEngine:
             
             new_temp = state['indoor_temp'] + temp_change
             
-            # For smart control mode, validate against setpoint constraints
+            # For smart control mode, validate against comfort range constraints
             if control_mode == 'smart':
-                setpoint = (self.comfort_min + self.comfort_max) / 2
-                max_deviation = setpoint * 0.05  # 5% tolerance as specified by user
-                max_deviation = max(max_deviation, 1.0)  # At least 1°F
-                max_deviation = min(max_deviation, 3.0)  # But not more than 3°F
-                
-                # If HVAC should prevent temperature from exceeding limits
-                if state['hvac_state'] == 'cool' and new_temp > setpoint + max_deviation:
-                    # Cooling should prevent temp from going too high
-                    new_temp = setpoint + max_deviation * 0.8  # Stay within 80% of limit
-                    logger.debug(f"🛡️ Smart HVAC cooling capped temp at {new_temp:.1f}°F (setpoint: {setpoint:.1f}°F)")
+                # Ensure smart HVAC keeps temperature within comfort bounds
+                if state['hvac_state'] == 'cool' and new_temp > self.comfort_max + 1.0:
+                    # Cooling should prevent temp from going too high above comfort range
+                    new_temp = self.comfort_max + 0.5  # Small overshoot allowed
+                    logger.debug(f"🛡️ Smart HVAC cooling capped temp at {new_temp:.1f}°F (comfort max: {self.comfort_max:.1f}°F)")
                     
-                elif state['hvac_state'] == 'heat' and new_temp < setpoint - max_deviation:
-                    # Heating should prevent temp from going too low
-                    new_temp = setpoint - max_deviation * 0.8  # Stay within 80% of limit
-                    logger.debug(f"🛡️ Smart HVAC heating capped temp at {new_temp:.1f}°F (setpoint: {setpoint:.1f}°F)")
+                elif state['hvac_state'] == 'heat' and new_temp < self.comfort_min - 1.0:
+                    # Heating should prevent temp from going too low below comfort range
+                    new_temp = self.comfort_min - 0.5  # Small undershoot allowed
+                    logger.debug(f"🛡️ Smart HVAC heating capped temp at {new_temp:.1f}°F (comfort min: {self.comfort_min:.1f}°F)")
             
             # Apply absolute temperature bounds
             new_temp = max(0, min(150, new_temp))  # 0°F to 150°F bounds
@@ -521,17 +501,25 @@ class ForecastEngine:
         Returns:
             New HVAC state: 'heat', 'cool', or 'off'
         """
-        # Calculate setpoint as midpoint of comfort range
-        setpoint = (self.comfort_min + self.comfort_max) / 2
+        # Use comfort band for efficient HVAC operation (62-80°F range)
+        # Heat when approaching lower comfort bound, cool when approaching upper bound
+        heat_on = self.comfort_min + 1.0   # Start heating 1°F above comfort minimum (63°F)
+        heat_off = self.comfort_min + 3.0  # Stop heating 3°F above comfort minimum (65°F) 
+        cool_on = self.comfort_max - 1.0   # Start cooling 1°F below comfort maximum (79°F)
+        cool_off = self.comfort_max - 3.0  # Stop cooling 3°F below comfort maximum (77°F)
         
-        # Tighter hysteresis around setpoint (0.5°F deadband)
-        heat_on = setpoint - 1.0   # Start heating 1°F below setpoint
-        heat_off = setpoint + 0.5  # Stop heating 0.5°F above setpoint
-        cool_on = setpoint + 1.0   # Start cooling 1°F above setpoint  
-        cool_off = setpoint - 0.5  # Stop cooling 0.5°F below setpoint
+        # Override with setpoint if available and reasonable
+        if hasattr(self, 'current_setpoint') and self.current_setpoint:
+            # Use setpoint for more precise control if it's within comfort range
+            if self.comfort_min <= self.current_setpoint <= self.comfort_max:
+                # Adjust thresholds around setpoint but still respect comfort bounds
+                heat_on = max(self.current_setpoint - 1.0, self.comfort_min)
+                heat_off = min(self.current_setpoint + 0.5, self.comfort_max)
+                cool_on = min(self.current_setpoint + 1.0, self.comfort_max)
+                cool_off = max(self.current_setpoint - 0.5, self.comfort_min)
         
         # Log control decisions for debugging
-        logger.debug(f"🎯 HVAC Control: Temp={current_temp:.1f}°F, Setpoint={setpoint:.1f}°F, State={current_hvac}, " +
+        logger.debug(f"🎯 HVAC Control: Temp={current_temp:.1f}°F, Comfort={self.comfort_min:.1f}-{self.comfort_max:.1f}°F, State={current_hvac}, " +
                     f"Heat: {heat_on:.1f}-{heat_off:.1f}°F, Cool: {cool_off:.1f}-{cool_on:.1f}°F")
         
         # Current state logic with hysteresis to maintain setpoint
@@ -561,16 +549,16 @@ class ForecastEngine:
                 logger.debug(f"❄️ Turning ON cooling: {current_temp:.1f}°F > {cool_on:.1f}°F")
                 return 'cool'
             else:
-                # Stay off - temperature is within acceptable range around setpoint
+                # Stay off - temperature is within comfort range
                 # Consider predictive control for energy efficiency
-                temp_drift_threshold = 2.0  # °F
+                comfort_mid = (self.comfort_min + self.comfort_max) / 2
                 
-                if outdoor_temp < current_temp - 5 and current_temp < setpoint + 0.5:
-                    # Cold outside, might need heat soon - preheat slightly if near setpoint
-                    return 'heat' if current_temp < setpoint else 'off'
-                elif outdoor_temp > current_temp + 5 and current_temp > setpoint - 0.5:
-                    # Hot outside, might need cooling soon - precool slightly if near setpoint
-                    return 'cool' if current_temp > setpoint else 'off'
+                if outdoor_temp < current_temp - 5 and current_temp < comfort_mid + 2.0:
+                    # Cold outside, might need heat soon - preheat slightly if in lower comfort range
+                    return 'heat' if current_temp < comfort_mid else 'off'
+                elif outdoor_temp > current_temp + 5 and current_temp > comfort_mid - 2.0:
+                    # Hot outside, might need cooling soon - precool slightly if in upper comfort range
+                    return 'cool' if current_temp > comfort_mid else 'off'
                     
                 return 'off'
                 
