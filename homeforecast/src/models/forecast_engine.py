@@ -966,19 +966,27 @@ class ForecastEngine:
     def _find_current_time_index(self, outdoor_series: List[Dict]) -> Optional[int]:
         """Find the index in outdoor_series that corresponds to current time"""
         if not outdoor_series:
+            logger.warning("🔍 _find_current_time_index: No outdoor series data")
             return None
             
         # Use timezone-aware current time to match the timestamps in the series
         if outdoor_series and 'timestamp' in outdoor_series[0]:
             sample_timestamp = outdoor_series[0]['timestamp']
+            logger.info(f"🔍 Sample timestamp: {sample_timestamp} (type: {type(sample_timestamp)}, tzinfo: {getattr(sample_timestamp, 'tzinfo', 'N/A')})")
+            
             if hasattr(sample_timestamp, 'tzinfo') and sample_timestamp.tzinfo is not None:
                 # Use timezone-aware current time matching the series timezone
                 current_time = datetime.now(sample_timestamp.tzinfo)
+                logger.info(f"🔍 Using timezone-aware current time: {current_time}")
             else:
                 # Use naive current time
                 current_time = datetime.now()
+                logger.info(f"🔍 Using naive current time: {current_time}")
         else:
             current_time = datetime.now()
+            logger.info(f"🔍 Using default current time: {current_time}")
+            
+        logger.info(f"🔍 Searching {len(outdoor_series)} outdoor points for current time index")
         
         # Find the point closest to current time
         min_diff = float('inf')
@@ -986,6 +994,7 @@ class ForecastEngine:
         
         for i, point in enumerate(outdoor_series):
             if point.get('data_type') == 'current':
+                logger.info(f"🔍 Found 'current' marker at index {i}")
                 return i
             
             # Fallback: find closest time to now
@@ -994,6 +1003,11 @@ class ForecastEngine:
                 if time_diff < min_diff:
                     min_diff = time_diff
                     current_index = i
+                    
+                # Debug first few and last few points
+                if i < 3 or i >= len(outdoor_series) - 3:
+                    logger.info(f"🔍 Point {i}: {point['timestamp']} -> diff: {time_diff/3600:.1f}h")
+                    
             except TypeError as e:
                 # Handle timezone mismatch by converting both to UTC for comparison
                 logger.warning(f"Timezone comparison error at index {i}: {e}")
@@ -1007,6 +1021,11 @@ class ForecastEngine:
                 except Exception as nested_e:
                     logger.warning(f"Could not compare timestamp at index {i}: {nested_e}")
                     continue
+        
+        logger.info(f"🔍 Found current_time_index: {current_index} with min_diff: {min_diff/3600:.1f}h")
+        if current_index is not None and current_index < len(outdoor_series):
+            closest_point = outdoor_series[current_index]
+            logger.info(f"🔍 Closest point timestamp: {closest_point['timestamp']}")
         
         return current_index
 
