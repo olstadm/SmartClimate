@@ -207,6 +207,12 @@ class DataStore:
                 cursor = conn.cursor()
                 
                 since = datetime.now() - timedelta(days=days)
+                logger.debug(f"Fetching training data since: {since}")
+                
+                # First, check total available measurements for debugging
+                cursor.execute("SELECT COUNT(*) FROM measurements WHERE timestamp > ?", (since,))
+                count = cursor.fetchone()[0]
+                logger.info(f"📊 Found {count} measurements in last {days} days for ML training")
                 
                 # Get measurements with calculated residual errors
                 cursor.execute("""
@@ -223,19 +229,20 @@ class DataStore:
                 rows = cursor.fetchall()
                 conn.close()
             
-            rows = cursor.fetchall()
-            
             training_data = []
             for row in rows:
                 data = dict(row)
                 # Calculate residual if we have model predictions stored
                 # For now, this would come from comparing with RC model predictions
                 training_data.append(data)
-                
+            
+            logger.info(f"📈 Prepared {len(training_data)} training data points")
             return training_data
             
         except Exception as e:
-            logger.error(f"Error getting training data: {e}")
+            logger.error(f"Error getting training data: {e}", exc_info=True)
+            logger.error(f"Database path: {self.db_path}")
+            logger.error(f"Database exists: {self.db_path.exists() if hasattr(self.db_path, 'exists') else 'Unknown'}")
             return []
             
     async def save_model_parameters(self, model_name: str, parameters: Any):

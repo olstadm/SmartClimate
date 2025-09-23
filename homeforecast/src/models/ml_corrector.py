@@ -55,10 +55,10 @@ class MLCorrector:
         # Load saved model if available
         await self.load_model()
         
-        # If no saved model, try to train one
+        # If no saved model, defer training to scheduled tasks to avoid initialization conflicts
         if not self.is_trained:
-            logger.info("🎯 No trained model found, attempting initial training...")
-            await self.retrain()
+            logger.info("🎯 No trained model found - will attempt training via scheduled task")
+            logger.info("💡 Initial ML training will be handled by the periodic training check")
         else:
             logger.info(f"✅ Loaded existing trained model with {len(self.performance_history)} training sessions")
             
@@ -88,18 +88,26 @@ class MLCorrector:
     async def retrain(self):
         """Retrain the ML model on recent data"""
         try:
-            logger.info("🤖 Retraining ML correction model...")
+            logger.info("🤖 Starting ML model retraining process...")
+            start_time = datetime.now()
             
             # Get training data from the last N days
             days_back = self.config.get('ml_training_days', 30)
             logger.info(f"📊 Fetching training data from last {days_back} days...")
             training_data = await self.data_store.get_training_data(days_back)
-            logger.info(f"📈 Retrieved {len(training_data)} raw data points")
+            logger.info(f"📈 Retrieved {len(training_data)} raw data points from database")
             
             if len(training_data) < 100:
                 logger.warning(f"⚠️ Insufficient training data: {len(training_data)} samples (need at least 100)")
                 logger.warning("🕐 Need more runtime to collect sufficient data for ML training")
+                logger.info(f"💡 Estimated hours needed: {(100 - len(training_data)) / 12:.1f}h (assuming 5min intervals)")
                 return
+                
+            # Show data range for debugging
+            if training_data:
+                first_timestamp = training_data[0].get('timestamp', 'Unknown')
+                last_timestamp = training_data[-1].get('timestamp', 'Unknown')
+                logger.info(f"📅 Training data range: {first_timestamp} to {last_timestamp}")
                 
             # Prepare features and targets
             logger.info("🔧 Preparing training features and targets...")
@@ -107,40 +115,64 @@ class MLCorrector:
             
             if X is None or len(X) < 100:
                 logger.warning("⚠️ Could not prepare sufficient training data after feature preparation")
+                logger.warning(f"🔍 Feature matrix shape: {X.shape if X is not None else 'None'}")
                 return
+                
+            logger.info(f"✅ Prepared feature matrix: {X.shape} (samples × features)")
+            logger.info(f"🎯 Target vector shape: {len(y)} samples")
+            logger.info(f"📊 Target statistics - Mean: {np.mean(y):.3f}, Std: {np.std(y):.3f}")
                 
             # Split data
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=0.2, random_state=42
             )
+            logger.info(f"📊 Data split - Train: {len(X_train)}, Test: {len(X_test)} samples")
             
             # Scale features
+            logger.info("⚖️ Scaling features...")
             X_train_scaled = self.scaler.fit_transform(X_train)
             X_test_scaled = self.scaler.transform(X_test)
+            logger.info("✅ Feature scaling completed")
             
             # Create and train model
+            logger.info(f"🏗️ Creating {self.model_type} model...")
             self._create_model()
+            
+            logger.info("🎓 Training model on scaled features...")
+            train_start = datetime.now()
             self.model.fit(X_train_scaled, y_train)
+            train_duration = (datetime.now() - train_start).total_seconds()
+            logger.info(f"✅ Model training completed in {train_duration:.2f} seconds")
             
             # Evaluate model
+            logger.info("📈 Evaluating model performance on test set...")
             y_pred = self.model.predict(X_test_scaled)
             mse = mean_squared_error(y_test, y_pred)
             mae = mean_absolute_error(y_test, y_pred)
             r2 = r2_score(y_test, y_pred)
             
             # Store performance metrics
-            self.performance_history.append({
+            training_session = {
                 'timestamp': datetime.now(),
                 'mse': mse,
                 'mae': mae,
                 'r2': r2,
                 'training_samples': len(X_train),
-                'test_samples': len(X_test)
-            })
+                'test_samples': len(X_test),
+                'training_duration': train_duration
+            }
+            self.performance_history.append(training_session)
             
-            logger.info(f"ML model retrained - MSE: {mse:.4f}, MAE: {mae:.4f}, R2: {r2:.4f}")
+            # Log detailed performance metrics
+            logger.info(f"🎯 Model Performance Metrics:")
+            logger.info(f"   📊 MSE (Mean Squared Error): {mse:.4f}")
+            logger.info(f"   📏 MAE (Mean Absolute Error): {mae:.4f}")
+            logger.info(f"   📈 R² Score: {r2:.4f} ({'Good' if r2 > 0.7 else 'Fair' if r2 > 0.5 else 'Poor'} fit)")
+            logger.info(f"   🕒 Training Duration: {train_duration:.2f} seconds")
             
             self.is_trained = True
+            total_duration = (datetime.now() - start_time).total_seconds()
+            logger.info(f"🎉 ML model training completed successfully in {total_duration:.2f} seconds")
             
             # Save model
             await self.save_model()
@@ -155,42 +187,70 @@ class MLCorrector:
     def _prepare_training_data(self, raw_data: List[Dict]) -> tuple:
         """Prepare features and targets from raw data"""
         try:
+            logger.info(f"🔧 Processing {len(raw_data)} raw data points for ML training")
+            
             # Convert to DataFrame for easier processing
             df = pd.DataFrame(raw_data)
+            logger.debug(f"📊 Raw DataFrame shape: {df.shape}")
+            logger.debug(f"📋 Available columns: {list(df.columns)}")
             
             # Sort by timestamp
             df['timestamp'] = pd.to_datetime(df['timestamp'])
             df = df.sort_values('timestamp')
+            logger.debug(f"📅 Data timestamp range: {df['timestamp'].min()} to {df['timestamp'].max()}")
             
             # Calculate time-based features
+            logger.debug("🕐 Creating time-based features...")
             df['hour_of_day'] = df['timestamp'].dt.hour
             df['day_of_week'] = df['timestamp'].dt.dayofweek
             df['month'] = df['timestamp'].dt.month
             
             # Calculate differences
+            logger.debug("🌡️ Calculating temperature and humidity differences...")
             df['temp_diff'] = df['outdoor_temp'] - df['indoor_temp']
             df['humidity_diff'] = df['outdoor_humidity'] - df['indoor_humidity']
             
             # Create HVAC binary indicators
+            logger.debug("🏠 Creating HVAC state indicators...")
             df['hvac_heat'] = (df['hvac_state'] == 'heat').astype(int)
             df['hvac_cool'] = (df['hvac_state'] == 'cool').astype(int)
             
+            hvac_summary = df['hvac_state'].value_counts()
+            logger.debug(f"🔥 HVAC state distribution: {dict(hvac_summary)}")
+            
             # Create lag features
+            logger.debug("⏰ Creating lag features...")
             df['outdoor_temp_lag1h'] = df['outdoor_temp'].shift(12)  # 12 * 5min = 1 hour
             df['outdoor_temp_lag3h'] = df['outdoor_temp'].shift(36)  # 36 * 5min = 3 hours
             df['indoor_temp_lag1h'] = df['indoor_temp'].shift(12)
             df['indoor_temp_change_1h'] = df['indoor_temp'] - df['indoor_temp_lag1h']
             
             # Drop rows with NaN values
+            rows_before = len(df)
             df = df.dropna()
+            rows_after = len(df)
+            logger.info(f"🧹 Cleaned data: {rows_before} → {rows_after} rows ({rows_before - rows_after} removed with NaN)")
             
             # Extract features
             feature_cols = [col for col in self.feature_columns if col in df.columns]
+            missing_cols = [col for col in self.feature_columns if col not in df.columns]
+            
+            logger.info(f"📊 Feature extraction: {len(feature_cols)}/{len(self.feature_columns)} features available")
+            if missing_cols:
+                logger.warning(f"❌ Missing features: {missing_cols}")
+            logger.debug(f"✅ Available features: {feature_cols}")
+            
             X = df[feature_cols].values
             
             # Target is the residual error (actual - predicted)
-            y = df['residual_error'].values if 'residual_error' in df else np.zeros(len(df))
+            if 'residual_error' in df:
+                y = df['residual_error'].values
+                logger.info(f"🎯 Using residual_error as target - range: [{np.min(y):.4f}, {np.max(y):.4f}]")
+            else:
+                y = np.zeros(len(df))
+                logger.warning("⚠️ No residual_error column found - using zeros as target (initial training)")
             
+            logger.info(f"✅ Feature preparation complete - X: {X.shape}, y: {len(y)} samples")
             return X, y
             
         except Exception as e:
@@ -208,6 +268,7 @@ class MLCorrector:
             Correction value in °C/hour
         """
         if not self.is_trained or self.model is None:
+            logger.debug("🤖 ML correction requested but model not trained - returning 0")
             return 0.0
             
         try:
@@ -215,6 +276,7 @@ class MLCorrector:
             feature_vector = self._prepare_features(features)
             
             if feature_vector is None:
+                logger.debug("⚠️ Could not prepare features for ML prediction - returning 0")
                 return 0.0
                 
             # Scale features
@@ -224,7 +286,16 @@ class MLCorrector:
             correction = self.model.predict(feature_vector_scaled)[0]
             
             # Clip to reasonable range
-            correction = np.clip(correction, -1.0, 1.0)  # Max ±1°C/hour correction
+            correction_clipped = np.clip(correction, -1.0, 1.0)  # Max ±1°C/hour correction
+            
+            # Log prediction details
+            logger.debug(f"🔮 ML Correction Prediction:")
+            logger.debug(f"   📊 Raw correction: {correction:.4f}°C/h")
+            logger.debug(f"   ✂️ Clipped correction: {correction_clipped:.4f}°C/h")
+            logger.debug(f"   🌡️ Indoor temp: {features.get('indoor_temp', 'N/A')}°F")
+            logger.debug(f"   🌡️ Outdoor temp: {features.get('outdoor_temp', 'N/A')}°F")
+            
+            correction = correction_clipped
             
             return float(correction)
             
@@ -275,10 +346,18 @@ class MLCorrector:
             importances = self.model.feature_importances_
             indices = np.argsort(importances)[::-1]
             
-            logger.info("Top 10 most important features:")
+            logger.info("🏆 Feature Importance Analysis (Top 10):")
+            total_importance = np.sum(importances)
+            
             for i in range(min(10, len(indices))):
                 idx = indices[i]
-                logger.info(f"  {self.feature_columns[idx]}: {importances[idx]:.4f}")
+                importance = importances[idx]
+                percentage = (importance / total_importance) * 100
+                logger.info(f"   {i+1:2d}. {self.feature_columns[idx]:20s}: {importance:.4f} ({percentage:5.1f}%)")
+            
+            # Log cumulative importance of top features
+            top5_cumulative = np.sum(importances[indices[:5]]) / total_importance * 100
+            logger.info(f"📊 Top 5 features explain {top5_cumulative:.1f}% of model decisions")
                 
     async def save_model(self):
         """Save the trained model and scaler"""

@@ -496,6 +496,7 @@ class ThermalModel:
         
         # Apply ML correction if available
         if self.ml_corrector and self.ml_enabled:
+            base_prediction = dT_dt
             correction = self.ml_corrector.predict_correction({
                 'indoor_temp': t_in,
                 'outdoor_temp': t_out,
@@ -505,6 +506,14 @@ class ThermalModel:
                 'solar_irradiance': solar,
                 'base_prediction': dT_dt
             })
+            
+            if correction != 0.0:
+                logger.info(f"🤖 ML Correction Applied:")
+                logger.info(f"   📊 Base RC prediction: {base_prediction:.4f}°F/h")
+                logger.info(f"   🔮 ML correction: {correction:.4f}°F/h")
+                logger.info(f"   📈 Final prediction: {base_prediction + correction:.4f}°F/h")
+                logger.info(f"   🏠 Context: T_in={t_in:.1f}°F, T_out={t_out:.1f}°F, HVAC={hvac_state}")
+            
             dT_dt += correction
         
         # Apply reasonable bounds to temperature change rate

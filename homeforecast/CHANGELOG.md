@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.10] - 2025-09-23
+
+### Fixed
+- **Database Connection Fix**: Resolved "Cannot operate on a closed database" error in ML training data retrieval
+- Fixed duplicate cursor.fetchall() call that caused database connection issues during ML model training
+- Improved database connection management in get_training_data() method
+
+### Enhanced
+- **Comprehensive ML Logging**: Added detailed logging throughout ML model lifecycle
+- Training process logging: data preparation, feature engineering, model training duration, performance metrics
+- Prediction logging: ML correction applications, feature importance analysis, training readiness checks
+- Added progress tracking for ML training data collection (shows X/100 samples needed)
+- Enhanced error handling with diagnostic information for ML training failures
+- Deferred initial ML training to scheduled tasks to avoid initialization conflicts
+
+### Added
+- Detailed feature importance analysis with percentage contributions
+- ML correction application logging in thermal model predictions
+- Training data range and statistics logging for debugging
+- Enhanced training readiness checks with progress indicators
+
 ## [1.8.9] - 2025-09-23
 
 ### Fixed
