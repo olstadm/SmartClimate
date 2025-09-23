@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.20] - 2025-09-23
+
+### Complete Chart Data Visualization & Timeline Separation
+- **Enhanced Historical Section Display**:
+  - Historical Actual Outdoor Temperature (from sensors) - solid brown line
+  - Historical Cached Forecasted Outdoor (from weather cache) - dashed gray line  
+  - Historical Actual Indoor Temperature (from sensors) - solid blue line
+  - HVAC State visualization (if applicable)
+
+- **Enhanced Forecast Section Display**:
+  - Forecasted Outdoor Temperature - dashed green line
+  - Forecasted Indoor (Smart HVAC) - dashed blue line
+  - Forecasted Indoor (No Control) - long-dashed orange line
+  - Forecasted HVAC State visualization
+
+- **Visual Timeline Separation**:
+  - Added prominent vertical "NOW" line with 🕒 emoji indicator
+  - Clear visual separation between historical facts and future predictions
+  - Automatic positioning based on timeline_separator metadata
+
+- **Improved Legacy Fallback**:
+  - Enhanced support for historical weather data in legacy mode
+  - Better data structure handling when new format unavailable
+  - Maintains visual consistency across data formats
+
+### Chart Visual Improvements
+- **Distinct Line Styles**: Solid lines for actual data, various dashed patterns for predictions
+- **Enhanced Colors**: Improved color scheme for better data distinction
+- **Better Point Markers**: Different sized points for different data types
+- **Timeline Annotations**: Clear "NOW" separator with descriptive labeling
+
 ## [1.8.19] - 2025-09-23
 
 ### Dashboard & Timestamp Parsing Fixes

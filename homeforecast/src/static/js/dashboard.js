@@ -515,39 +515,66 @@ class HomeForecastDashboard {
             });
             allLabels = [...historicalLabels, ...forecastLabels];
 
+            // === HISTORICAL SECTION ===
+            
             // 1. Historical Actual Outdoor Temperature (from sensors)
             if (data.historical_data.actual_outdoor_temp) {
                 datasets.push({
                     label: 'Historical Outdoor (Actual)',
                     data: [...data.historical_data.actual_outdoor_temp, 
                            ...new Array(forecastLabels.length).fill(null)],
-                    borderColor: '#795548',
-                    backgroundColor: 'rgba(121, 85, 72, 0.2)',
+                    borderColor: '#8B4513',
+                    backgroundColor: 'rgba(139, 69, 19, 0.2)',
                     tension: 0.4,
-                    pointRadius: 3,
+                    pointRadius: 4,
                     borderWidth: 3,
                     borderDash: [0], // Solid line for actual data
                     fill: false
                 });
             }
 
-            // 2. Historical Actual Indoor Temperature (from sensors)
+            // 2. Historical Cached Forecasted Outdoor (from weather cache)
+            if (data.historical_weather && data.historical_weather.length > 0) {
+                // Pad historical weather data to match timeline
+                const historicalWeatherData = data.historical_weather.map(hw => hw.temperature);
+                // Pad to match historical timeline length
+                while (historicalWeatherData.length < historicalLabels.length) {
+                    historicalWeatherData.push(null);
+                }
+                
+                datasets.push({
+                    label: 'Historical Cached Forecast',
+                    data: [...historicalWeatherData, 
+                           ...new Array(forecastLabels.length).fill(null)],
+                    borderColor: '#607D8B',
+                    backgroundColor: 'rgba(96, 125, 139, 0.2)',
+                    tension: 0.4,
+                    pointRadius: 2,
+                    borderWidth: 2,
+                    borderDash: [3, 3], // Dashed line for cached forecast
+                    fill: false
+                });
+            }
+
+            // 3. Historical Actual Indoor Temperature (from sensors)
             if (data.historical_data.actual_indoor_temp) {
                 datasets.push({
                     label: 'Historical Indoor (Actual)',
                     data: [...data.historical_data.actual_indoor_temp, 
                            ...new Array(forecastLabels.length).fill(null)],
-                    borderColor: '#1976D2',
-                    backgroundColor: 'rgba(25, 118, 210, 0.2)',
+                    borderColor: '#0D47A1',
+                    backgroundColor: 'rgba(13, 71, 161, 0.2)',
                     tension: 0.4,
-                    pointRadius: 4,
+                    pointRadius: 5,
                     borderWidth: 4,
                     borderDash: [0], // Solid line for actual data
                     fill: false
                 });
             }
 
-            // 3. Forecasted Outdoor Temperature
+            // === FORECAST SECTION ===
+
+            // 4. Forecasted Outdoor Temperature
             if (data.forecast_data.forecasted_outdoor_temp) {
                 datasets.push({
                     label: 'Forecasted Outdoor',
@@ -556,33 +583,33 @@ class HomeForecastDashboard {
                     borderColor: '#4CAF50',
                     backgroundColor: 'rgba(76, 175, 80, 0.1)',
                     tension: 0.4,
-                    pointRadius: 2,
-                    borderWidth: 2,
+                    pointRadius: 3,
+                    borderWidth: 3,
                     borderDash: [5, 5], // Dashed line for forecasted data
                     fill: false
                 });
             }
 
-            // 4. Projected Indoor with HVAC Control
+            // 5. Projected Indoor with HVAC Control
             if (data.forecast_data.projected_indoor_with_hvac) {
                 datasets.push({
-                    label: 'Projected Indoor (Smart HVAC)',
+                    label: 'Forecasted Indoor (Smart HVAC)',
                     data: [...new Array(historicalLabels.length).fill(null),
                            ...data.forecast_data.projected_indoor_with_hvac],
                     borderColor: '#2196F3',
                     backgroundColor: 'rgba(33, 150, 243, 0.1)',
                     tension: 0.4,
-                    pointRadius: 3,
-                    borderWidth: 3,
-                    borderDash: [3, 3], // Dashed line for projections
+                    pointRadius: 4,
+                    borderWidth: 4,
+                    borderDash: [8, 4], // Dashed line for projections
                     fill: false
                 });
             }
 
-            // 5. Projected Indoor without HVAC (No Control)
+            // 6. Projected Indoor without HVAC (No Control)
             if (data.forecast_data.projected_indoor_no_hvac) {
                 datasets.push({
-                    label: 'Projected Indoor (No Control)',
+                    label: 'Forecasted Indoor (No Control)',
                     data: [...new Array(historicalLabels.length).fill(null),
                            ...data.forecast_data.projected_indoor_no_hvac],
                     borderColor: '#FF9800',
@@ -590,7 +617,7 @@ class HomeForecastDashboard {
                     tension: 0.4,
                     pointRadius: 2,
                     borderWidth: 2,
-                    borderDash: [10, 5], // Long dashed line for no control scenario
+                    borderDash: [15, 5], // Long dashed line for no control scenario
                     fill: false
                 });
             }
@@ -598,48 +625,111 @@ class HomeForecastDashboard {
         } else {
             // Fallback to legacy format if new structure not available
             console.log('📊 Using legacy data structure for chart');
-            allLabels = data.timestamps.map(ts => {
-                const date = new Date(ts);
-                return date.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit', hour12: true });
-            });
-
-            datasets.push({
-                label: 'Projected Indoor (Smart HVAC)',
-                data: data.controlled_trajectory.map(p => p.indoor_temp),
-                borderColor: '#2196F3',
-                backgroundColor: 'rgba(33, 150, 243, 0.1)',
-                tension: 0.4,
-                pointRadius: 3,
-                borderWidth: 3,
-                fill: false
-            });
             
-            // Add other legacy datasets
-            if (data.outdoor_forecast) {
+            // Handle historical weather data in legacy mode
+            if (data.historical_weather && data.historical_weather.length > 0) {
+                console.log(`Adding ${data.historical_weather.length} historical weather points to legacy chart`);
+                
+                // Create historical labels and data
+                const historicalLabels = data.historical_weather.map(hw => {
+                    const date = new Date(hw.timestamp);
+                    return date.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit', hour12: true });
+                });
+
+                // Create combined labels (historical + forecast)
+                const forecastLabels = data.timestamps.map(ts => {
+                    const date = new Date(ts);
+                    return date.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit', hour12: true });
+                });
+                allLabels = [...historicalLabels, ...forecastLabels];
+
+                // Historical outdoor temperature dataset
                 datasets.push({
-                    label: 'Outdoor Forecast',
-                    data: data.outdoor_forecast,
+                    label: 'Historical Outdoor (Cached)',
+                    data: [...data.historical_weather.map(hw => hw.temperature), 
+                           ...new Array(forecastLabels.length).fill(null)],
+                    borderColor: '#8B4513',
+                    backgroundColor: 'rgba(139, 69, 19, 0.2)',
+                    tension: 0.4,
+                    pointRadius: 2,
+                    borderWidth: 2,
+                    borderDash: [3, 3],
+                    fill: false
+                });
+
+                // Forecast outdoor data with null values for historical period
+                datasets.push({
+                    label: 'Forecasted Outdoor',
+                    data: [...new Array(historicalLabels.length).fill(null),
+                           ...data.outdoor_forecast],
                     borderColor: '#4CAF50',
                     backgroundColor: 'rgba(76, 175, 80, 0.1)',
                     tension: 0.4,
-                    pointRadius: 2,
-                    borderWidth: 2,
+                    pointRadius: 3,
+                    borderWidth: 3,
+                    borderDash: [5, 5],
                     fill: false
                 });
-            }
-            
-            if (data.idle_forecast) {
+
+                // Indoor forecasts also need null padding for historical period
                 datasets.push({
-                    label: 'Projected Indoor (No Control)',
-                    data: data.idle_forecast,
-                    borderColor: '#FF9800',
-                    backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                    label: 'Projected Indoor (Smart HVAC)',
+                    data: [...new Array(historicalLabels.length).fill(null),
+                           ...data.controlled_trajectory.map(p => p.indoor_temp)],
+                    borderColor: '#2196F3',
+                    backgroundColor: 'rgba(33, 150, 243, 0.1)',
                     tension: 0.4,
-                    pointRadius: 2,
-                    borderWidth: 2,
-                    borderDash: [10, 5],
+                    pointRadius: 4,
+                    borderWidth: 4,
+                    borderDash: [8, 4],
                     fill: false
                 });
+
+            } else {
+                // No historical data - standard legacy chart
+                allLabels = data.timestamps.map(ts => {
+                    const date = new Date(ts);
+                    return date.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit', hour12: true });
+                });
+
+                datasets.push({
+                    label: 'Projected Indoor (Smart HVAC)',
+                    data: data.controlled_trajectory.map(p => p.indoor_temp),
+                    borderColor: '#2196F3',
+                    backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                    tension: 0.4,
+                    pointRadius: 3,
+                    borderWidth: 3,
+                    fill: false
+                });
+                
+                // Add other legacy datasets if available
+                if (data.outdoor_forecast) {
+                    datasets.push({
+                        label: 'Outdoor Forecast',
+                        data: data.outdoor_forecast,
+                        borderColor: '#4CAF50',
+                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                        tension: 0.4,
+                        pointRadius: 2,
+                        borderWidth: 2,
+                        fill: false
+                    });
+                }
+                
+                if (data.idle_forecast) {
+                    datasets.push({
+                        label: 'Projected Indoor (No Control)',
+                        data: data.idle_forecast,
+                        borderColor: '#FF9800',
+                        backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                        tension: 0.4,
+                        pointRadius: 2,
+                        borderWidth: 2,
+                        borderDash: [10, 5],
+                        fill: false
+                    });
+                }
             }
         }
 
@@ -811,6 +901,49 @@ class HomeForecastDashboard {
                 }
             }
         };
+
+        // Add "NOW" vertical line to separate historical from forecast data
+        if (data.timeline_separator && data.timeline_separator.historical_end_index !== undefined) {
+            const nowLineIndex = data.timeline_separator.historical_end_index + 0.5; // Position between last historical and first forecast
+            annotations.nowLine = {
+                type: 'line',
+                xMin: nowLineIndex,
+                xMax: nowLineIndex,
+                borderColor: '#FF6B6B',
+                borderWidth: 4,
+                borderDash: [8, 4],
+                label: {
+                    content: '🕒 NOW - Forecast Begins',
+                    enabled: true,
+                    position: 'start',
+                    backgroundColor: 'rgba(255, 107, 107, 0.9)',
+                    color: 'white',
+                    font: { size: 12, weight: 'bold' },
+                    padding: 8,
+                    rotation: 0
+                }
+            };
+        } else if (data.historical_data && data.historical_data.timestamps) {
+            // Fallback: use length of historical data as separator
+            const nowLineIndex = data.historical_data.timestamps.length - 0.5;
+            annotations.nowLine = {
+                type: 'line',
+                xMin: nowLineIndex,
+                xMax: nowLineIndex,
+                borderColor: '#FF6B6B',
+                borderWidth: 4,
+                borderDash: [8, 4],
+                label: {
+                    content: '🕒 NOW - Forecast Begins',
+                    enabled: true,
+                    position: 'start',
+                    backgroundColor: 'rgba(255, 107, 107, 0.9)',
+                    color: 'white',
+                    font: { size: 12, weight: 'bold' },
+                    padding: 8
+                }
+            };
+        }
 
         // Add HVAC operation period annotations
         hvacPeriods.forEach((period, index) => {
