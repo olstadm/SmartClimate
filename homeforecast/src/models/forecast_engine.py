@@ -429,6 +429,9 @@ class ForecastEngine:
         
         # Simulate each time step
         for i, outdoor in enumerate(outdoor_series):
+            # Debug: Log first few temperature transitions for continuity checking
+            if i < 3 and control_mode == 'idle':
+                logger.info(f"🔍 Idle trajectory step {i}: T_in={state['indoor_temp']:.2f}°F, T_out={outdoor['outdoor_temp']:.2f}°F")
             # Determine HVAC state based on control mode
             if control_mode == 'idle':
                 state['hvac_state'] = 'off'
@@ -1051,6 +1054,19 @@ class ForecastEngine:
             if i < current_time_index:
                 # Historical/current data - don't modify
                 validated_trajectory.append(step)
+                continue
+            elif i == current_time_index:
+                # First forecast point - ensure continuity with current temperature
+                # This is critical to prevent discontinuity at the "now" line
+                corrected_step = step.copy()
+                corrected_step['indoor_temp'] = current_conditions['indoor_temp']
+                corrected_step['trend_validation'] = {
+                    'original_prediction': step['indoor_temp'],
+                    'correction_applied': True,
+                    'correction_reason': 'Continuity preservation at current time',
+                    'confidence_score': 1.0
+                }
+                validated_trajectory.append(corrected_step)
                 continue
             
             # Future predictions - validate against trends
