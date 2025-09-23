@@ -149,7 +149,12 @@ class DataStore:
                     'idle_trajectory': forecast_result.get('idle_trajectory', []),
                     'controlled_trajectory': forecast_result.get('controlled_trajectory', []),
                     'timestamps': [dt.isoformat() if isinstance(dt, datetime) else str(dt) 
-                                  for dt in forecast_result.get('timestamps', [])]
+                                  for dt in forecast_result.get('timestamps', [])],
+                    # Enhanced data structure for historical/forecast separation
+                    'historical_data': forecast_result.get('historical_data', {}),
+                    'forecast_data': forecast_result.get('forecast_data', {}),
+                    'timeline_separator': forecast_result.get('timeline_separator', {}),
+                    'current_time_index': forecast_result.get('current_time_index')
                 }
                 forecast_json = json.dumps(forecast_data, default=self._serialize_datetime)
                 
