@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.17] - 2025-09-23
+
+### Historical Sensor Data Integration & Visual Timeline Separation
+- **Actual Historical Data Display**: Charts now show real sensor measurements from data store
+  - Historical outdoor temperatures from actual weather sensors
+  - Historical indoor temperatures from Home Assistant sensors
+  - Historical HVAC states from actual thermostat operation
+- **Enhanced Chart Data Structure**: Implemented proper historical_data/forecast_data separation
+- **Timeline Visual Indicators**: Added clear separation markers between historical and forecast periods
+- **Smart Data Alignment**: Historical sensor data intelligently matched to chart timestamps within 15-minute windows
+- **Visual Chart Improvements**:
+  - Solid lines for actual historical sensor data
+  - Dashed lines for weather forecasts and temperature projections
+  - Clear visual distinction between "what happened" vs "what's predicted"
+- **Fallback Data Handling**: Graceful handling when historical sensor data unavailable
+
+### Enhanced Backend Data Management
+- **Historical Sensor Retrieval**: New `_get_historical_sensor_data()` method for accurate chart data
+- **Timeline Separator Metadata**: Added timeline separation indicators for frontend rendering
+- **12-Hour Historical Window**: Retrieves sufficient historical data to populate 6-hour chart display
+- **Data Store Integration**: Leverages existing measurements table for actual temperature/HVAC history
+
+### Fixed
+- **Chart Historical Data**: Eliminated use of projected data in historical 6-hour timeline
+- **Visual Confusion**: Clear indicators now separate "actual past" from "predicted future"
+- **Data Accuracy**: Charts display real sensor measurements instead of interpolated projections
+
 ## [1.8.16] - 2025-09-23
 
 ### Major Chart & Control Logic Overhaul

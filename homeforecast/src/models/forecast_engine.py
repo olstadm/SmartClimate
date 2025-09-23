@@ -222,13 +222,15 @@ class ForecastEngine:
             if current_time_index is not None and current_time_index > 0:
                 logger.info(f"📊 Separating {current_time_index} historical points from {len(controlled_trajectory) - current_time_index} forecast points")
                 
-                # Historical Hours (Previous 6 hours) - ACTUAL DATA
+                # Get actual historical sensor data from data store
+                actual_historical_data = await self._get_historical_sensor_data(timestamps[:current_time_index])
+                
+                # Historical Hours (Previous 6 hours) - ACTUAL DATA FROM SENSORS
                 historical_data = {
                     'timestamps': timestamps[:current_time_index],
-                    'projected_outdoor_temp': [step['outdoor_temp'] for step in outdoor_series[:current_time_index]],  # This is actually historical
-                    'actual_outdoor_temp': [step['outdoor_temp'] for step in outdoor_series[:current_time_index]],  # Same for now, could be enhanced
-                    'actual_indoor_temp': [step['indoor_temp'] for step in controlled_trajectory[:current_time_index]],  # From sensors
-                    'actual_hvac_mode': [step['hvac_state'] for step in controlled_trajectory[:current_time_index]],  # Historical HVAC state
+                    'actual_outdoor_temp': actual_historical_data.get('outdoor_temps', [step['outdoor_temp'] for step in outdoor_series[:current_time_index]]),
+                    'actual_indoor_temp': actual_historical_data.get('indoor_temps', [step['indoor_temp'] for step in controlled_trajectory[:current_time_index]]),
+                    'actual_hvac_mode': actual_historical_data.get('hvac_states', [step['hvac_state'] for step in controlled_trajectory[:current_time_index]]),
                 }
                 
                 # Forecast Hours (Next 12 hours) - PREDICTIONS
@@ -261,6 +263,14 @@ class ForecastEngine:
                 # Separated data (for UI rendering)
                 'historical_data': historical_data,
                 'forecast_data': forecast_data,
+                
+                # Timeline separator for visual indication
+                'timeline_separator': {
+                    'historical_end_index': current_time_index - 1 if current_time_index else 0,
+                    'forecast_start_index': current_time_index if current_time_index else 0,
+                    'separator_timestamp': timestamps[current_time_index] if current_time_index and current_time_index < len(timestamps) else None,
+                    'separator_label': 'Current Time - Forecast Begins'
+                },
                 
                 # Legacy format (for backward compatibility) - use forecast portion only
                 'timestamps': timestamps,
@@ -1074,5 +1084,81 @@ class ForecastEngine:
                             'solar_irradiance': 0.0,
                             'data_type': 'interpolated'
                         })
+    
+    async def _get_historical_sensor_data(self, target_timestamps: List[datetime]) -> Dict:
+        """
+        Retrieve actual historical sensor data for the specified timestamps
+        Returns data aligned with target timestamps for chart display
+        """
+        try:
+            if not target_timestamps:
+                return {'outdoor_temps': [], 'indoor_temps': [], 'hvac_states': []}
+            
+            # Get historical measurements from the last 12 hours to ensure we have data
+            historical_measurements = await self.data_store.get_recent_measurements(hours=12)
+            
+            if not historical_measurements:
+                logger.warning("No historical sensor measurements found in data store")
+                return {'outdoor_temps': [], 'indoor_temps': [], 'hvac_states': []}
+            
+            logger.info(f"📊 Found {len(historical_measurements)} historical measurements for chart data")
+            
+            # Organize measurements by timestamp
+            measurements_by_time = {}
+            for measurement in historical_measurements:
+                # Convert timestamp string to datetime if needed
+                if isinstance(measurement['timestamp'], str):
+                    try:
+                        # Try parsing ISO format first
+                        if 'T' in measurement['timestamp']:
+                            ts = datetime.fromisoformat(measurement['timestamp'].replace('Z', '+00:00'))
+                        else:
+                            # Try parsing simple format
+                            ts = datetime.strptime(measurement['timestamp'], '%Y-%m-%d %H:%M:%S')
+                    except Exception as e:
+                        logger.warning(f"Failed to parse timestamp {measurement['timestamp']}: {e}")
+                        continue
+                else:
+                    ts = measurement['timestamp']
+                
+                measurements_by_time[ts] = measurement
+            
+            # Align measurements with target timestamps
+            outdoor_temps = []
+            indoor_temps = []
+            hvac_states = []
+            
+            for target_ts in target_timestamps:
+                # Find the closest measurement within 15 minutes
+                closest_measurement = None
+                min_diff = timedelta(hours=1)  # Start with 1 hour as max acceptable difference
+                
+                for ts, measurement in measurements_by_time.items():
+                    diff = abs(target_ts - ts)
+                    if diff < min_diff:
+                        min_diff = diff
+                        closest_measurement = measurement
+                
+                if closest_measurement and min_diff < timedelta(minutes=15):
+                    outdoor_temps.append(closest_measurement.get('outdoor_temp', 20.0))
+                    indoor_temps.append(closest_measurement.get('indoor_temp', 21.0))
+                    hvac_states.append(closest_measurement.get('hvac_state', 'off'))
+                else:
+                    # Use fallback values if no close measurement found
+                    outdoor_temps.append(None)  # Will be filled by chart with interpolated data
+                    indoor_temps.append(None)   # Will be filled by chart with interpolated data
+                    hvac_states.append('unknown')
+            
+            logger.info(f"📊 Aligned {len([t for t in outdoor_temps if t is not None])} historical temperature measurements with chart timestamps")
+            
+            return {
+                'outdoor_temps': outdoor_temps,
+                'indoor_temps': indoor_temps,
+                'hvac_states': hvac_states
+            }
+            
+        except Exception as e:
+            logger.error(f"Error retrieving historical sensor data: {e}")
+            return {'outdoor_temps': [], 'indoor_temps': [], 'hvac_states': []}
         
         return filled_series
