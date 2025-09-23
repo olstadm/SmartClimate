@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.21] - 2025-09-23
+
+### Dashboard Error Fixes & Data Structure Compatibility
+- **Fixed Energy Chart Crash**: Resolved `TypeError: Cannot read properties of undefined (reading 'filter')` 
+- **Enhanced Data Structure Handling**: Added compatibility for new chart data structure in energy chart
+- **Improved Error Handling**: Added proper null checks and fallback data handling
+- **Trajectory Data Synthesis**: Creates synthetic trajectory data from new forecast structure when needed
+- **Runtime Calculation Fix**: Added safe division by zero handling for HVAC runtime calculations
+
+### Technical Details
+- Fixed `updateEnergyChart` method to handle both legacy and new data structures
+- Added proper validation for `controlled_trajectory` and `current_trajectory` data
+- Implemented fallback logic when trajectory data unavailable from new chart structure
+- Enhanced error logging for better debugging of data structure issues
+
 ## [1.8.20] - 2025-09-23
 
 ### Complete Chart Data Visualization & Timeline Separation

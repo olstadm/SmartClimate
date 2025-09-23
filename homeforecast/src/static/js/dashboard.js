@@ -1034,11 +1034,51 @@ class HomeForecastDashboard {
         const ctx = document.getElementById('energyChart');
         if (!ctx) return;
 
-        // Calculate HVAC runtime for each trajectory
-        const controlledRuntime = data.controlled_trajectory.filter(p => p.hvac_state !== 'off').length;
-        const currentRuntime = data.current_trajectory.filter(p => p.hvac_state !== 'off').length;
+        // Check if we have the required trajectory data
+        let controlledTrajectory = data.controlled_trajectory;
+        let currentTrajectory = data.current_trajectory;
         
-        const runtimeReduction = ((currentRuntime - controlledRuntime) / currentRuntime * 100).toFixed(1);
+        // Handle new data structure if trajectories not directly available
+        if (!controlledTrajectory && data.forecast_data && data.forecast_data.projected_indoor_with_hvac) {
+            // Create synthetic trajectory data from new structure
+            controlledTrajectory = data.forecast_data.projected_indoor_with_hvac.map((temp, i) => ({
+                indoor_temp: temp,
+                hvac_state: data.forecast_data.projected_hvac_mode ? data.forecast_data.projected_hvac_mode[i] : 'off'
+            }));
+        }
+        
+        if (!currentTrajectory && data.forecast_data && data.forecast_data.projected_indoor_no_hvac) {
+            // Create synthetic trajectory data from new structure  
+            currentTrajectory = data.forecast_data.projected_indoor_no_hvac.map((temp, i) => ({
+                indoor_temp: temp,
+                hvac_state: 'off' // No HVAC control
+            }));
+        }
+
+        // Fallback to empty arrays if still no data
+        if (!controlledTrajectory || !Array.isArray(controlledTrajectory)) {
+            console.warn('No controlled trajectory data available for energy chart');
+            controlledTrajectory = [];
+        }
+        
+        if (!currentTrajectory || !Array.isArray(currentTrajectory)) {
+            console.warn('No current trajectory data available for energy chart');
+            currentTrajectory = [];
+        }
+
+        // Calculate HVAC runtime for each trajectory
+        const controlledRuntime = controlledTrajectory.filter(p => p.hvac_state && p.hvac_state !== 'off').length;
+        const currentRuntime = currentTrajectory.filter(p => p.hvac_state && p.hvac_state !== 'off').length;
+        
+        // Calculate runtime reduction safely
+        let runtimeReduction = 0;
+        if (currentRuntime > 0) {
+            runtimeReduction = ((currentRuntime - controlledRuntime) / currentRuntime * 100).toFixed(1);
+        } else if (controlledRuntime === 0) {
+            runtimeReduction = 0; // Both are zero - no change
+        } else {
+            runtimeReduction = -100; // Current is 0 but controlled has runtime
+        }
 
         const chartData = {
             labels: ['Current Control', 'Smart Control'],
