@@ -534,7 +534,19 @@ class ThermalModel:
         
         # Extract and interpret parameters
         a = theta[0]  # 1/τ
-        tau = 1 / abs(a) if abs(a) > 0.001 else 1000  # Time constant in hours
+        
+        # Constrain thermal time constant to realistic range (12-16 hours)
+        if abs(a) > 0.001:
+            raw_tau = 1 / abs(a)
+            # Clamp to reasonable range while allowing some adjustment
+            tau = max(12.0, min(16.0, raw_tau))
+            # Update the parameter if it was constrained
+            if tau != raw_tau:
+                theta[0] = 1 / tau if a > 0 else -1 / tau
+                self.rls.theta[0] = theta[0]
+                logger.debug(f"Constrained thermal time constant from {raw_tau:.1f}h to {tau:.1f}h")
+        else:
+            tau = 14.0  # Default to middle of range
         
         params = {
             'time_constant': tau,

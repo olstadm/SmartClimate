@@ -315,6 +315,34 @@ class HomeForecastDashboard {
                                            (insights.recommended_action || 'unknown').toLowerCase();
         }
 
+        // Context-aware label updates
+        const isCurrentlyActive = insights.next_action_time === 'Currently Active';
+        const isCurrentlyOff = insights.action_off_time && insights.action_off_time.includes('Currently off');
+        
+        // Update "Next Climate On Time" label based on context
+        const nextActionLabel = document.querySelector('#nextActionTime').previousElementSibling;
+        if (nextActionLabel && nextActionLabel.classList.contains('metric-label')) {
+            if (isCurrentlyActive) {
+                nextActionLabel.textContent = 'HVAC Status:';
+            } else if (insights.recommended_action && insights.recommended_action.includes('NOW')) {
+                nextActionLabel.textContent = 'Action Needed:';
+            } else {
+                nextActionLabel.textContent = 'Next Climate On Time:';
+            }
+        }
+
+        // Update "Climate Action Off Time" label based on context  
+        const actionOffLabel = document.querySelector('#actionOffTime').previousElementSibling;
+        if (actionOffLabel && actionOffLabel.classList.contains('metric-label')) {
+            if (isCurrentlyOff) {
+                actionOffLabel.textContent = 'HVAC Status:';
+            } else if (isCurrentlyActive) {
+                actionOffLabel.textContent = 'Estimated Off Time:';
+            } else {
+                actionOffLabel.textContent = 'Climate Action Off Time:';
+            }
+        }
+
         const actionOffTimeEl = document.getElementById('actionOffTime');
         if (actionOffTimeEl) {
             actionOffTimeEl.textContent = insights.action_off_time || 'N/A';

@@ -193,6 +193,18 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
         hvac_mode = thermostat_data.get('hvac_mode', 'off')
         hvac_action = thermostat_data.get('hvac_action', 'idle')
         
+        # Also check HVAC state flags for more accurate status
+        hvac_heating = thermostat_data.get('hvac_heat', False) or thermostat_data.get('heating', False)
+        hvac_cooling = thermostat_data.get('hvac_cool', False) or thermostat_data.get('cooling', False)
+        
+        # Override action detection with direct HVAC state if available
+        if hvac_heating and not hvac_cooling:
+            hvac_action = 'heating'
+        elif hvac_cooling and not hvac_heating:
+            hvac_action = 'cooling'
+        elif not hvac_heating and not hvac_cooling:
+            hvac_action = 'idle'
+        
         # Use actual comfort range from config  
         comfort_min = config.get('comfort_min_temp', 62.0)
         comfort_max = config.get('comfort_max_temp', 80.0)
@@ -229,11 +241,18 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
         
         now = datetime.now()
         
+        # Context-aware insights: Only show relevant timing based on current HVAC state
+        is_currently_heating = hvac_heating or hvac_action in ['heating', 'heat'] or (hvac_mode == 'heat' and hvac_action != 'idle')
+        is_currently_cooling = hvac_cooling or hvac_action in ['cooling', 'cool'] or (hvac_mode == 'cool' and hvac_action != 'idle')
+        
+        logger.info(f"HVAC Context - Currently heating: {is_currently_heating}, Currently cooling: {is_currently_cooling}, " +
+                   f"HVAC flags - Heat: {hvac_heating}, Cool: {hvac_cooling}, Action: {hvac_action}")
+        
         # HVAC is actively heating
-        if hvac_action in ['heating', 'heat'] or (hvac_mode == 'heat' and hvac_action != 'idle'):
+        if is_currently_heating:
             insights['recommended_action'] = 'HEATING'
             
-            # Calculate when to turn off heating (when target reached)
+            # Context: Already heating, focus on OFF time and runtime
             if current_temp < target_temp:
                 temp_diff = target_temp - current_temp
                 runtime_hours = temp_diff / heating_rate
@@ -241,22 +260,18 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
                 off_time = now + timedelta(hours=runtime_hours)
                 insights['action_off_time'] = format_time_consistent(off_time)
                 
-                # Predict next heating cycle (when temp drops to comfort_min)
-                temp_after_off = target_temp
-                for hour in range(1, 13):  # Check next 12 hours
-                    temp_after_off -= drift_rate
-                    if temp_after_off <= comfort_min:
-                        next_heat_time = off_time + timedelta(hours=hour-0.5)  # Start early
-                        insights['next_action_time'] = format_time_consistent(next_heat_time)
-                        break
+                # Don't show next ON time since we're already heating
+                insights['next_action_time'] = 'Currently Active'
             else:
                 insights['action_off_time'] = "Now"
+                insights['estimated_runtime'] = "0 min"
+                insights['next_action_time'] = 'Currently Active'
                 
         # HVAC is actively cooling  
-        elif hvac_action in ['cooling', 'cool'] or (hvac_mode == 'cool' and hvac_action != 'idle'):
+        elif is_currently_cooling:
             insights['recommended_action'] = 'COOLING'
             
-            # Calculate when to turn off cooling (when target reached)
+            # Context: Already cooling, focus on OFF time and runtime
             if current_temp > target_temp:
                 temp_diff = current_temp - target_temp
                 runtime_hours = temp_diff / cooling_rate
@@ -264,31 +279,41 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
                 off_time = now + timedelta(hours=runtime_hours)
                 insights['action_off_time'] = format_time_consistent(off_time)
                 
-                # Predict next cooling cycle (when temp rises to comfort_max)
-                temp_after_off = target_temp
-                for hour in range(1, 13):  # Check next 12 hours
-                    temp_after_off += drift_rate
-                    if temp_after_off >= comfort_max:
-                        next_cool_time = off_time + timedelta(hours=hour-0.5)  # Start early
-                        insights['next_action_time'] = format_time_consistent(next_cool_time)
-                        break
+                # Don't show next ON time since we're already cooling
+                insights['next_action_time'] = 'Currently Active'
             else:
                 insights['action_off_time'] = "Now"
+                insights['estimated_runtime'] = "0 min"
+                insights['next_action_time'] = 'Currently Active'
                 
         # HVAC is off or idle - predict when to start
-        elif hvac_mode == 'off' or hvac_action == 'idle':
+        else:
+            # Context: HVAC is idle, focus on NEXT ON time and estimated duration
             
             # Currently outside comfort range - recommend immediate action
             if current_temp < comfort_min and hvac_mode in ['heat', 'heat_cool', 'auto']:
                 insights['recommended_action'] = 'HEAT NOW'
                 insights['next_action_time'] = "Now"
+                # Calculate how long heating will take to reach comfort
+                temp_diff = (comfort_min + comfort_max) / 2 - current_temp  # Heat to mid-comfort
+                runtime_hours = temp_diff / heating_rate
+                insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
+                insights['action_off_time'] = 'After heating completes'
+                
             elif current_temp > comfort_max and hvac_mode in ['cool', 'heat_cool', 'auto']:
                 insights['recommended_action'] = 'COOL NOW'
                 insights['next_action_time'] = "Now"
+                # Calculate how long cooling will take to reach comfort
+                temp_diff = current_temp - (comfort_min + comfort_max) / 2  # Cool to mid-comfort
+                runtime_hours = temp_diff / cooling_rate
+                insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
+                insights['action_off_time'] = 'After cooling completes'
+                
             else:
                 insights['recommended_action'] = 'OFF'
+                insights['action_off_time'] = 'N/A (Currently off)'
                 
-                # Predict when heating will be needed
+                # Predict when heating will be needed (prioritize heating in dual mode)
                 if hvac_mode in ['heat', 'heat_cool', 'auto']:
                     temp_prediction = current_temp
                     for hour in range(1, 13):  # Check next 12 hours
@@ -296,16 +321,24 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
                         if temp_prediction <= comfort_min:
                             heat_start_time = now + timedelta(hours=max(0, hour-1))
                             insights['next_action_time'] = format_time_consistent(heat_start_time)
+                            # Estimate heating duration needed
+                            temp_to_heat = (comfort_min + comfort_max) / 2 - comfort_min
+                            runtime_hours = temp_to_heat / heating_rate
+                            insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min (heating)"
                             break
                             
-                # Predict when cooling will be needed
-                elif hvac_mode in ['cool', 'heat_cool', 'auto']:
+                # Predict when cooling will be needed (only if not dual mode or no heating needed)
+                elif hvac_mode in ['cool'] or (hvac_mode in ['heat_cool', 'auto'] and insights['next_action_time'] == 'N/A'):
                     temp_prediction = current_temp
                     for hour in range(1, 13):  # Check next 12 hours
                         temp_prediction += drift_rate
                         if temp_prediction >= comfort_max:
                             cool_start_time = now + timedelta(hours=max(0, hour-1))
                             insights['next_action_time'] = format_time_consistent(cool_start_time)
+                            # Estimate cooling duration needed
+                            temp_to_cool = comfort_max - (comfort_min + comfort_max) / 2
+                            runtime_hours = temp_to_cool / cooling_rate
+                            insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min (cooling)"
                             break
         
         # Format times based on timezone if available
@@ -488,7 +521,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '1.8.12',
+                'addon_version': '1.8.13',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -506,7 +539,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '1.8.12',
+                'version': '1.8.13',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),

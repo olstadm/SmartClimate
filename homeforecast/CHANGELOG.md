@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.13] - 2025-09-23
+
+### Enhanced
+- **Thermal Model Constraints**: Constrained thermal time constant to realistic 12-16 hour range
+- **Context-Aware Climate Insights**: Climate insights now adapt based on current HVAC state
+  - When HVAC is active: Focus on "Off Time" and remaining runtime (hide redundant "Next On Time")
+  - When HVAC is idle: Focus on "Next On Time" and expected duration
+  - Dynamic UI labels that change based on current context ("HVAC Status", "Action Needed", etc.)
+- **Improved HVAC Detection**: Enhanced HVAC state detection using direct heating/cooling flags
+- **Accurate Runtime Estimates**: Better runtime calculations based on actual temperature differences
+
 ## [1.8.12] - 2025-09-23
 
 ### Fixed
