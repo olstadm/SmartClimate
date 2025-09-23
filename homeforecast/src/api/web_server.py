@@ -10,6 +10,10 @@ from flask_cors import CORS
 import asyncio
 import threading
 import os
+import tempfile
+
+logger = logging.getLogger(__name__)
+
 try:
     import numpy as np
     HAS_NUMPY = True
@@ -22,7 +26,13 @@ try:
 except ImportError:
     HAS_PYTZ = False
 
-logger = logging.getLogger(__name__)
+# Import V2.0 components
+try:
+    from ..models.enhanced_training_system import EnhancedTrainingSystem
+    HAS_ENHANCED_TRAINING = True
+except ImportError as e:
+    logger.warning(f"Enhanced training system not available: {e}")
+    HAS_ENHANCED_TRAINING = False
 
 
 def format_time_consistent(dt, include_seconds=False) -> str:
@@ -791,7 +801,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '2.0.1',
+                'addon_version': '2.0.2',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -828,7 +838,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '2.0.1',
+                'version': '2.0.2',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
@@ -1572,11 +1582,14 @@ information about HomeForecast operation.
                     'error': 'File must be a .idf file'
                 }), 400
                 
+            # Check if enhanced training is available
+            if not HAS_ENHANCED_TRAINING:
+                return jsonify({
+                    'success': False,
+                    'error': 'Enhanced training system not available'
+                }), 500
+                
             # Save uploaded file temporarily
-            import tempfile
-            import os
-            from ..models.enhanced_training_system import EnhancedTrainingSystem
-            
             with tempfile.NamedTemporaryFile(mode='w+b', suffix='.idf', delete=False) as tmp_file:
                 file.save(tmp_file.name)
                 tmp_path = tmp_file.name
@@ -1646,11 +1659,14 @@ information about HomeForecast operation.
             # Get optional parameters
             limit_hours = request.form.get('limit_hours', type=int)
             
-            # Save uploaded file temporarily
-            import tempfile
-            import os
-            from ..models.enhanced_training_system import EnhancedTrainingSystem
+            # Check if enhanced training is available
+            if not HAS_ENHANCED_TRAINING:
+                return jsonify({
+                    'success': False,
+                    'error': 'Enhanced training system not available'
+                }), 500
             
+            # Save uploaded file temporarily
             with tempfile.NamedTemporaryFile(mode='w+b', suffix='.epw', delete=False) as tmp_file:
                 file.save(tmp_file.name)
                 tmp_path = tmp_file.name
@@ -1713,8 +1729,14 @@ information about HomeForecast operation.
             comfort_min = data.get('comfort_min', 68.0)
             comfort_max = data.get('comfort_max', 76.0)
             
+            # Check if enhanced training is available
+            if not HAS_ENHANCED_TRAINING:
+                return jsonify({
+                    'success': False,
+                    'error': 'Enhanced training system not available'
+                }), 500
+            
             # Run enhanced training
-            from ..models.enhanced_training_system import EnhancedTrainingSystem
             training_system = EnhancedTrainingSystem(homeforecast_instance.thermal_model)
             training_system.building_model = homeforecast_instance.building_model
             training_system.weather_dataset = homeforecast_instance.weather_dataset
@@ -1755,7 +1777,7 @@ information about HomeForecast operation.
             training_completed = hasattr(homeforecast_instance, 'training_results') and homeforecast_instance.training_results
             
             status = {
-                'version': '2.0.1',
+                'version': '2.0.2',
                 'building_model_loaded': building_model_loaded,
                 'weather_dataset_loaded': weather_dataset_loaded,
                 'training_completed': training_completed,
@@ -1790,7 +1812,7 @@ information about HomeForecast operation.
         except Exception as e:
             logger.error(f"❌ Error getting v2.0 model status: {e}")
             return jsonify({
-                'version': '2.0.1',
+                'version': '2.0.2',
                 'error': f'Error getting model status: {str(e)}',
                 'building_model_loaded': False,
                 'weather_dataset_loaded': False,

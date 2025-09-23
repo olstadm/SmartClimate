@@ -1576,18 +1576,26 @@ class HomeForecastDashboard {
     }
 
     setupV2EventListeners() {
+        console.log('Setting up V2.0 event listeners...');
+        
         // IDF file upload
         const idfInput = document.getElementById('idfFileInput');
         const idfZone = document.getElementById('idfUploadZone');
         
         if (idfInput) {
+            console.log('IDF input found, adding event listener');
             idfInput.addEventListener('change', (e) => this.handleIDFUpload(e.target.files[0]));
+        } else {
+            console.warn('IDF input element not found');
         }
         
         if (idfZone) {
-            idfZone.addEventListener('dragover', this.handleDragOver);
-            idfZone.addEventListener('dragleave', this.handleDragLeave);
+            console.log('IDF upload zone found, adding drag/drop listeners');
+            idfZone.addEventListener('dragover', (e) => this.handleDragOver(e));
+            idfZone.addEventListener('dragleave', (e) => this.handleDragLeave(e));
             idfZone.addEventListener('drop', (e) => this.handleIDFDrop(e));
+        } else {
+            console.warn('IDF upload zone not found');
         }
 
         // EPW file upload
@@ -1595,13 +1603,19 @@ class HomeForecastDashboard {
         const epwZone = document.getElementById('epwUploadZone');
         
         if (epwInput) {
+            console.log('EPW input found, adding event listener');
             epwInput.addEventListener('change', (e) => this.handleEPWUpload(e.target.files[0]));
+        } else {
+            console.warn('EPW input element not found');
         }
         
         if (epwZone) {
-            epwZone.addEventListener('dragover', this.handleDragOver);
-            epwZone.addEventListener('dragleave', this.handleDragLeave);
+            console.log('EPW upload zone found, adding drag/drop listeners');
+            epwZone.addEventListener('dragover', (e) => this.handleDragOver(e));
+            epwZone.addEventListener('dragleave', (e) => this.handleDragLeave(e));
             epwZone.addEventListener('drop', (e) => this.handleEPWDrop(e));
+        } else {
+            console.warn('EPW upload zone not found');
         }
 
         // Comfort band inputs
@@ -1651,6 +1665,7 @@ class HomeForecastDashboard {
     }
 
     async handleIDFUpload(file) {
+        console.log('IDF upload called with file:', file);
         if (!file || !file.name.toLowerCase().endsWith('.idf')) {
             this.showNotification('Please select a valid .idf file', 'error');
             return;
@@ -1682,6 +1697,7 @@ class HomeForecastDashboard {
     }
 
     async handleEPWUpload(file) {
+        console.log('EPW upload called with file:', file);
         if (!file || !file.name.toLowerCase().endsWith('.epw')) {
             this.showNotification('Please select a valid .epw file', 'error');
             return;
@@ -1841,9 +1857,16 @@ class HomeForecastDashboard {
     }
 
     async startV2Training() {
+        console.log('Starting V2.0 training...');
         const trainBtn = document.getElementById('startV2TrainingBtn');
         const progressSection = document.getElementById('trainingProgressSection');
         const resultsSection = document.getElementById('trainingResultsSection');
+        
+        console.log('Training elements found:', {
+            trainBtn: !!trainBtn,
+            progressSection: !!progressSection,
+            resultsSection: !!resultsSection
+        });
 
         if (!trainBtn || !progressSection) return;
 
@@ -2019,8 +2042,12 @@ class HomeForecastDashboard {
 
 // Global functions for V2.0 training
 function startV2Training() {
+    console.log('Global startV2Training called');
     if (window.dashboard) {
+        console.log('Dashboard instance found, calling method');
         window.dashboard.startV2Training();
+    } else {
+        console.error('Dashboard instance not found on window object');
     }
 }
 
