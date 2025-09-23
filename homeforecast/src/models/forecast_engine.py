@@ -232,15 +232,58 @@ class ForecastEngine:
             if controlled_trajectory:
                 logger.info(f"  - Controlled temp range: {min(s['indoor_temp'] for s in controlled_trajectory):.1f}°F - {max(s['indoor_temp'] for s in controlled_trajectory):.1f}°F")
             
+            # Separate historical from forecast data
+            historical_data = {}
+            forecast_only_data = {}
+            
+            if current_time_index is not None and current_time_index > 0:
+                logger.info(f"📊 Separating {current_time_index} historical points from {len(controlled_trajectory) - current_time_index} forecast points")
+                
+                historical_data = {
+                    'timestamps': timestamps[:current_time_index],
+                    'outdoor_temps': [step['outdoor_temp'] for step in outdoor_series[:current_time_index]],
+                    'outdoor_humidity': [step['outdoor_humidity'] for step in outdoor_series[:current_time_index]],
+                    'solar_irradiance': [step['solar_irradiance'] for step in outdoor_series[:current_time_index]],
+                }
+                
+                forecast_only_data = {
+                    'timestamps': timestamps[current_time_index:],
+                    'indoor_forecast': [step['indoor_temp'] for step in controlled_trajectory[current_time_index:]],
+                    'idle_forecast': [step['indoor_temp'] for step in idle_trajectory[current_time_index:]],
+                    'outdoor_forecast': [step['outdoor_temp'] for step in outdoor_series[current_time_index:]],
+                    'outdoor_humidity_forecast': [step['outdoor_humidity'] for step in outdoor_series[current_time_index:]],
+                    'solar_forecast': [step['solar_irradiance'] for step in outdoor_series[current_time_index:]],
+                }
+            else:
+                # No historical data - everything is forecast
+                forecast_only_data = {
+                    'timestamps': timestamps,
+                    'indoor_forecast': [step['indoor_temp'] for step in controlled_trajectory],
+                    'idle_forecast': [step['indoor_temp'] for step in idle_trajectory],
+                    'outdoor_forecast': [step['outdoor_temp'] for step in outdoor_series],
+                    'outdoor_humidity_forecast': [step['outdoor_humidity'] for step in outdoor_series],
+                    'solar_forecast': [step['solar_irradiance'] for step in outdoor_series],
+                }
+
             result = {
                 'timestamp': datetime.now(),
                 'initial_conditions': initial_state,
-                'outdoor_forecast': [step['outdoor_temp'] for step in outdoor_series],
-                'indoor_forecast': [step['indoor_temp'] for step in controlled_trajectory],
+                
+                # Full trajectories (for internal use)
                 'idle_trajectory': idle_trajectory,
                 'controlled_trajectory': controlled_trajectory,
                 'current_trajectory': current_trajectory,
+                
+                # Separated data (for UI rendering)
+                'historical_data': historical_data,
+                'forecast_only_data': forecast_only_data,
+                
+                # Legacy format (for backward compatibility)
                 'timestamps': timestamps,
+                'outdoor_forecast': [step['outdoor_temp'] for step in outdoor_series],
+                'indoor_forecast': [step['indoor_temp'] for step in controlled_trajectory],
+                
+                # Additional data
                 'current_time_index': current_time_index,
                 'historical_weather': historical_weather,
                 'trend_analysis': trend_analysis,

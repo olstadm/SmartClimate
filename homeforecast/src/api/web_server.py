@@ -192,18 +192,26 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
         target_temp = thermostat_data.get('target_temperature', 72.0)
         hvac_mode = thermostat_data.get('hvac_mode', 'off')
         hvac_action = thermostat_data.get('hvac_action', 'idle')
+        hvac_state = thermostat_data.get('hvac_state', 'off')
         
         # Also check HVAC state flags for more accurate status
         hvac_heating = thermostat_data.get('hvac_heat', False) or thermostat_data.get('heating', False)
         hvac_cooling = thermostat_data.get('hvac_cool', False) or thermostat_data.get('cooling', False)
         
-        # Override action detection with direct HVAC state if available
+        # Enhanced HVAC state detection using multiple sources
         if hvac_heating and not hvac_cooling:
             hvac_action = 'heating'
         elif hvac_cooling and not hvac_heating:
             hvac_action = 'cooling'
-        elif not hvac_heating and not hvac_cooling:
+        elif hvac_state in ['heat', 'heating']:
+            hvac_action = 'heating'
+        elif hvac_state in ['cool', 'cooling']:
+            hvac_action = 'cooling'
+        elif not hvac_heating and not hvac_cooling and hvac_state == 'off':
             hvac_action = 'idle'
+            
+        logger.info(f"🌡️ Climate Context: Temp={current_temp}°F, Target={target_temp}°F, Mode={hvac_mode}, " +
+                   f"Action={hvac_action}, State={hvac_state}, Heating={hvac_heating}, Cooling={hvac_cooling}")
         
         # Use actual comfort range from config  
         comfort_min = config.get('comfort_min_temp', 62.0)
@@ -290,56 +298,101 @@ def calculate_climate_insights(current_data, thermostat_data, config, comfort_an
         else:
             # Context: HVAC is idle, focus on NEXT ON time and estimated duration
             
-            # Currently outside comfort range - recommend immediate action
-            if current_temp < comfort_min and hvac_mode in ['heat', 'heat_cool', 'auto']:
-                insights['recommended_action'] = 'HEAT NOW'
-                insights['next_action_time'] = "Now"
-                # Calculate how long heating will take to reach comfort
-                temp_diff = (comfort_min + comfort_max) / 2 - current_temp  # Heat to mid-comfort
-                runtime_hours = temp_diff / heating_rate
-                insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
-                insights['action_off_time'] = 'After heating completes'
+            # Enhanced logic: Use thermostat setpoint for more accurate predictions
+            if target_temp:
+                # Calculate temperature difference from setpoint
+                temp_diff_from_setpoint = current_temp - target_temp
                 
-            elif current_temp > comfort_max and hvac_mode in ['cool', 'heat_cool', 'auto']:
-                insights['recommended_action'] = 'COOL NOW'
-                insights['next_action_time'] = "Now"
-                # Calculate how long cooling will take to reach comfort
-                temp_diff = current_temp - (comfort_min + comfort_max) / 2  # Cool to mid-comfort
-                runtime_hours = temp_diff / cooling_rate
-                insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
-                insights['action_off_time'] = 'After cooling completes'
+                # Determine if immediate action is needed based on setpoint and mode
+                if hvac_mode == 'cool' and temp_diff_from_setpoint > 1.0:
+                    # Cooling mode and significantly above setpoint
+                    insights['recommended_action'] = 'COOL NOW'
+                    insights['next_action_time'] = "Now"
+                    runtime_hours = abs(temp_diff_from_setpoint) / cooling_rate
+                    insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
+                    insights['action_off_time'] = f"After reaching {target_temp}°F"
+                    
+                elif hvac_mode == 'heat' and temp_diff_from_setpoint < -1.0:
+                    # Heating mode and significantly below setpoint
+                    insights['recommended_action'] = 'HEAT NOW'
+                    insights['next_action_time'] = "Now"
+                    runtime_hours = abs(temp_diff_from_setpoint) / heating_rate
+                    insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
+                    insights['action_off_time'] = f"After reaching {target_temp}°F"
+                    
+                # Fallback to comfort range logic for other modes
+                elif current_temp < comfort_min and hvac_mode in ['heat', 'heat_cool', 'auto']:
+                    insights['recommended_action'] = 'HEAT NOW'
+                    insights['next_action_time'] = "Now"
+                    temp_diff = comfort_min - current_temp
+                    runtime_hours = temp_diff / heating_rate
+                    insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
+                    insights['action_off_time'] = 'After heating completes'
+                    
+                elif current_temp > comfort_max and hvac_mode in ['cool', 'heat_cool', 'auto']:
+                    insights['recommended_action'] = 'COOL NOW'
+                    insights['next_action_time'] = "Now"
+                    temp_diff = current_temp - comfort_max
+                    runtime_hours = temp_diff / cooling_rate
+                    insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
+                    insights['action_off_time'] = 'After cooling completes'
                 
-            else:
-                insights['recommended_action'] = 'OFF'
-                insights['action_off_time'] = 'N/A (Currently off)'
-                
-                # Predict when heating will be needed (prioritize heating in dual mode)
-                if hvac_mode in ['heat', 'heat_cool', 'auto']:
-                    temp_prediction = current_temp
-                    for hour in range(1, 13):  # Check next 12 hours
-                        temp_prediction -= drift_rate
-                        if temp_prediction <= comfort_min:
-                            heat_start_time = now + timedelta(hours=max(0, hour-1))
-                            insights['next_action_time'] = format_time_consistent(heat_start_time)
-                            # Estimate heating duration needed
-                            temp_to_heat = (comfort_min + comfort_max) / 2 - comfort_min
-                            runtime_hours = temp_to_heat / heating_rate
-                            insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min (heating)"
-                            break
+                else:
+                    insights['recommended_action'] = 'OFF'
+                    insights['action_off_time'] = 'N/A (Currently off)'
+                    
+                    # Predict when action will be needed based on setpoint and mode
+                    if hvac_mode == 'cool':
+                        # Cooling mode - predict when temp will rise above setpoint + deadband
+                        temp_prediction = current_temp
+                        for hour in range(1, 13):  # Check next 12 hours
+                            temp_prediction += drift_rate
+                            if temp_prediction >= target_temp + 1.0:  # 1°F above setpoint
+                                cool_start_time = now + timedelta(hours=max(0, hour-0.5))
+                                insights['next_action_time'] = format_time_consistent(cool_start_time)
+                                # Estimate cooling duration to return to setpoint
+                                temp_to_cool = 2.0  # Cool from +1°F to -0.5°F around setpoint
+                                runtime_hours = temp_to_cool / cooling_rate
+                                insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min (cooling)"
+                                break
+                                
+                    elif hvac_mode == 'heat':
+                        # Heating mode - predict when temp will fall below setpoint - deadband
+                        temp_prediction = current_temp
+                        for hour in range(1, 13):  # Check next 12 hours
+                            temp_prediction -= drift_rate
+                            if temp_prediction <= target_temp - 1.0:  # 1°F below setpoint
+                                heat_start_time = now + timedelta(hours=max(0, hour-0.5))
+                                insights['next_action_time'] = format_time_consistent(heat_start_time)
+                                # Estimate heating duration to return to setpoint
+                                temp_to_heat = 2.0  # Heat from -1°F to +0.5°F around setpoint
+                                runtime_hours = temp_to_heat / heating_rate
+                                insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min (heating)"
+                                break
+                    
+                    # Fallback to comfort range predictions for auto/heat_cool modes
+                    elif hvac_mode in ['heat_cool', 'auto']:
+                        temp_prediction = current_temp
+                        for hour in range(1, 13):  # Check next 12 hours
+                            temp_prediction_cold = temp_prediction - (drift_rate * hour)
+                            temp_prediction_hot = temp_prediction + (drift_rate * hour)
                             
-                # Predict when cooling will be needed (only if not dual mode or no heating needed)
-                elif hvac_mode in ['cool'] or (hvac_mode in ['heat_cool', 'auto'] and insights['next_action_time'] == 'N/A'):
-                    temp_prediction = current_temp
-                    for hour in range(1, 13):  # Check next 12 hours
-                        temp_prediction += drift_rate
-                        if temp_prediction >= comfort_max:
-                            cool_start_time = now + timedelta(hours=max(0, hour-1))
-                            insights['next_action_time'] = format_time_consistent(cool_start_time)
-                            # Estimate cooling duration needed
-                            temp_to_cool = comfort_max - (comfort_min + comfort_max) / 2
-                            runtime_hours = temp_to_cool / cooling_rate
-                            insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min (cooling)"
-                            break
+                            if temp_prediction_cold <= comfort_min:
+                                heat_start_time = now + timedelta(hours=max(0, hour-0.5))
+                                insights['next_action_time'] = format_time_consistent(heat_start_time)
+                                runtime_hours = (comfort_min + 1 - temp_prediction_cold) / heating_rate
+                                insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min (heating)"
+                                break
+                            elif temp_prediction_hot >= comfort_max:
+                                cool_start_time = now + timedelta(hours=max(0, hour-0.5))
+                                insights['next_action_time'] = format_time_consistent(cool_start_time)
+                                runtime_hours = (temp_prediction_hot - comfort_max + 1) / cooling_rate
+                                insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min (cooling)"
+                                break
+            else:
+                # No target temperature available, use comfort range fallback
+                insights['recommended_action'] = 'MONITOR'
+                insights['next_action_time'] = 'N/A (No setpoint)'
         
         # Format times based on timezone if available
         if hasattr(comfort_analyzer, 'homeforecast') and hasattr(comfort_analyzer.homeforecast, 'ha_client'):
@@ -521,7 +574,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '1.8.14',
+                'addon_version': '1.8.15',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -539,7 +592,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '1.8.14',
+                'version': '1.8.15',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),

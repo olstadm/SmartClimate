@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.15] - 2025-09-23
+
+### Enhanced Data Visualization & Accuracy
+- **Historical vs Forecast Separation**: Charts now properly separate 6-hour historical data from predictions
+- **Enhanced Climate Insights**: Improved accuracy for thermostat in 'cool' mode with idle action
+- **Setpoint-Based Predictions**: Climate insights now use actual thermostat setpoint (80°F) instead of comfort ranges
+- **Context-Aware HVAC Logic**: Better prediction of when cooling will activate based on setpoint + deadband
+- **Historical Data Handling**: Historical weather data shown as actual data, not predictions
+- **Enhanced HVAC State Detection**: Improved detection using hvac_state, hvac_action, and direct flags
+
+### Fixed
+- **Chart Timeline Issues**: Resolved predictions appearing in historical 6-hour window
+- **Climate Insights Accuracy**: Fixed interpretation of thermostat data showing mode='cool', target=80°F, action='idle'
+- **Setpoint Recognition**: System now properly recognizes when temperature approaches setpoint thresholds
+
 ## [1.8.14] - 2025-09-23
 
 ### Major Accuracy Improvements
