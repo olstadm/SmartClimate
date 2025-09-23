@@ -1140,10 +1140,24 @@ class ForecastEngine:
                 min_diff = timedelta(hours=1)  # Start with 1 hour as max acceptable difference
                 
                 for ts, measurement in measurements_by_time.items():
-                    diff = abs(target_ts - ts)
-                    if diff < min_diff:
-                        min_diff = diff
-                        closest_measurement = measurement
+                    try:
+                        # Ensure both timestamps are comparable (handle timezone awareness)
+                        if target_ts.tzinfo is not None and ts.tzinfo is None:
+                            # target_ts is timezone-aware, ts is timezone-naive
+                            # Convert ts to UTC assuming it's in UTC
+                            ts = ts.replace(tzinfo=pytz.UTC) if HAS_PYTZ else ts
+                        elif target_ts.tzinfo is None and ts.tzinfo is not None:
+                            # target_ts is timezone-naive, ts is timezone-aware
+                            # Convert ts to naive by removing timezone
+                            ts = ts.replace(tzinfo=None)
+                        
+                        diff = abs(target_ts - ts)
+                        if diff < min_diff:
+                            min_diff = diff
+                            closest_measurement = measurement
+                    except Exception as e:
+                        logger.warning(f"Error comparing timestamps {target_ts} and {ts}: {e}")
+                        continue
                 
                 if closest_measurement and min_diff < timedelta(minutes=15):
                     outdoor_temps.append(closest_measurement.get('outdoor_temp', 20.0))
