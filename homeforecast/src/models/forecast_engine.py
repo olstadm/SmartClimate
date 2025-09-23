@@ -1115,8 +1115,12 @@ class ForecastEngine:
                         if 'T' in measurement['timestamp']:
                             ts = datetime.fromisoformat(measurement['timestamp'].replace('Z', '+00:00'))
                         else:
-                            # Try parsing simple format
-                            ts = datetime.strptime(measurement['timestamp'], '%Y-%m-%d %H:%M:%S')
+                            # Try parsing simple format with microseconds first
+                            try:
+                                ts = datetime.strptime(measurement['timestamp'], '%Y-%m-%d %H:%M:%S.%f')
+                            except ValueError:
+                                # Fallback to format without microseconds
+                                ts = datetime.strptime(measurement['timestamp'], '%Y-%m-%d %H:%M:%S')
                     except Exception as e:
                         logger.warning(f"Failed to parse timestamp {measurement['timestamp']}: {e}")
                         continue

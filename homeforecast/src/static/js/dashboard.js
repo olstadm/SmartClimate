@@ -648,42 +648,6 @@ class HomeForecastDashboard {
             labels: allLabels,
             datasets: datasets
         };
-                    },
-                    {
-                        label: 'Forecasted Outdoor',
-                        data: data.outdoor_forecast,
-                        borderColor: '#4CAF50',
-                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
-                        tension: 0.4,
-                        pointRadius: 2,
-                        borderWidth: 2,
-                        fill: false
-                    },
-                    {
-                        label: 'Indoor (No HVAC Control)',
-                        data: data.idle_trajectory.map(p => p.indoor_temp),
-                        borderColor: '#F44336',
-                        backgroundColor: 'rgba(244, 67, 54, 0.1)',
-                        borderDash: [8, 4],
-                        tension: 0.4,
-                        pointRadius: 0,
-                        borderWidth: 2,
-                        fill: false
-                    },
-                    {
-                        label: 'Indoor (Current Trajectory)',
-                        data: data.current_trajectory ? data.current_trajectory.map(p => p.indoor_temp) : [],
-                        borderColor: '#FF9800',
-                        backgroundColor: 'rgba(255, 152, 0, 0.1)',
-                        borderDash: [4, 2],
-                        tension: 0.4,
-                        pointRadius: 0,
-                        borderWidth: 1,
-                        fill: false
-                    }
-                ]
-            };
-        }
 
         const options = {
             responsive: true,

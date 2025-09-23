@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.19] - 2025-09-23
+
+### Dashboard & Timestamp Parsing Fixes
+- **Fixed JavaScript Syntax Error**: Resolved `Unexpected token ','` preventing dashboard from loading
+- **Enhanced Timestamp Parsing**: Fixed parsing of timestamps with microseconds from database
+- **Dashboard Chart Display**: Removed orphaned JavaScript code causing syntax errors
+- **Historical Data Retrieval**: Improved timestamp format handling for sensor data integration
+
+### Technical Details
+- Cleaned up duplicate/orphaned JavaScript code in dashboard chart generation
+- Added proper microsecond parsing support for database timestamps (`%Y-%m-%d %H:%M:%S.%f`)
+- Fallback parsing for timestamps without microseconds for backward compatibility
+- Eliminated "Failed to parse timestamp" warnings in forecast engine logs
+
 ## [1.8.18] - 2025-09-23
 
 ### Critical Bug Fix
