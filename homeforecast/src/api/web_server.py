@@ -645,7 +645,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '1.8.28',
+                'addon_version': '1.8.29',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -682,7 +682,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '1.8.28',
+                'version': '1.8.29',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
@@ -737,6 +737,10 @@ def create_app(homeforecast_instance):
                     forecast_data = forecast['data']
                     logger.info(f"Forecast data keys: {list(forecast_data.keys())}")
                     
+                    # 🔍 DEBUG: Check for enhanced data structure
+                    has_enhanced = 'historical_data' in forecast_data and 'forecast_data' in forecast_data
+                    logger.info(f"🔍 Enhanced structure check: historical_data={bool(forecast_data.get('historical_data'))}, forecast_data={bool(forecast_data.get('forecast_data'))}, has_enhanced={has_enhanced}")
+                    
                     # Add chart-ready data for frontend
                     if 'timestamps' in forecast_data and 'indoor_forecast' in forecast_data and 'outdoor_forecast' in forecast_data:
                         chart_data = {
@@ -752,10 +756,12 @@ def create_app(homeforecast_instance):
                 
                 # Add new separated data structure for enhanced chart
                 if 'historical_data' in forecast_data and 'forecast_data' in forecast_data:
-                    # Use the new enhanced structure
-                    logger.info(f"✅ Enhanced chart data structure available")
+                    # Use the new enhanced structure  
+                    logger.info(f"✅ Enhanced chart data structure FOUND in forecast_data")
                     logger.info(f"Historical data keys: {list(forecast_data['historical_data'].keys()) if forecast_data['historical_data'] else 'None'}")
                     logger.info(f"Forecast data keys: {list(forecast_data['forecast_data'].keys()) if forecast_data['forecast_data'] else 'None'}")
+                    logger.info(f"Historical timestamps: {len(forecast_data['historical_data'].get('timestamps', []))}")
+                    logger.info(f"Forecast timestamps: {len(forecast_data['forecast_data'].get('timestamps', []))}")
                 elif 'controlled_trajectory' in forecast_data and 'idle_trajectory' in forecast_data:
                     # Create enhanced structure from legacy data
                     logger.info("🔄 Creating enhanced chart structure from legacy data")
