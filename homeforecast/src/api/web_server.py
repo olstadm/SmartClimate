@@ -584,13 +584,32 @@ def create_app(homeforecast_instance):
 
             # Format current local time
             current_local_time = "N/A"
+            timezone_info = {}
             try:
                 if hasattr(app.homeforecast, 'ha_client'):
                     current_local_time = app.homeforecast.ha_client.format_time_for_display(datetime.now())
                 else:
                     current_local_time = format_time_consistent(datetime.now())
+                    
+                # Add detailed timezone debugging information
+                import os, time
+                timezone_info = {
+                    'system_timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
+                    'container_tz_env': os.environ.get('TZ', 'Not set'),
+                    'system_utc_offset': time.timezone / 3600,
+                    'system_dst': time.daylight,
+                    'current_utc_time': datetime.utcnow().isoformat(),
+                    'current_local_time_raw': datetime.now().isoformat(),
+                    'ha_timezone': getattr(app.homeforecast, 'ha_timezone', 'Not set') if hasattr(app.homeforecast, 'ha_timezone') else 'Not set'
+                }
+                
+                # Add timezone from HA client if available
+                if hasattr(app.homeforecast, 'ha_client') and hasattr(app.homeforecast.ha_client, 'timezone'):
+                    timezone_info['ha_client_timezone'] = str(app.homeforecast.ha_client.timezone)
+                    
             except Exception as e:
                 logger.warning(f"Could not format current time: {e}")
+                timezone_info['error'] = str(e)
 
             response_data = {
                 'status': 'running',
@@ -598,6 +617,7 @@ def create_app(homeforecast_instance):
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
+                'timezone_debug': timezone_info,
                 'current_time': current_local_time,
                 'current_data': current_data,
                 'thermostat_data': thermostat_data,
@@ -721,6 +741,47 @@ def create_app(homeforecast_instance):
                     
                     logger.info("✅ Enhanced chart structure created from legacy data")
                 
+                # Add timezone debugging information to the forecast response
+                try:
+                    import time, os
+                    from datetime import datetime
+                    
+                    timezone_debug = {
+                        'container_tz': os.environ.get('TZ', 'Not set'),
+                        'system_timezone': time.tzname,
+                        'utc_offset_hours': -time.timezone / 3600,
+                        'current_utc_time': datetime.utcnow().isoformat() + 'Z',
+                        'current_local_time': datetime.now().isoformat(),
+                        'forecast_generated_at': forecast.get('timestamp', 'Unknown')
+                    }
+                    
+                    # Check if we have timestamps in the forecast data
+                    if 'timestamps' in forecast_data and forecast_data['timestamps']:
+                        first_ts = forecast_data['timestamps'][0]
+                        last_ts = forecast_data['timestamps'][-1]
+                        current_index = forecast_data.get('current_time_index', 0)
+                        current_ts = forecast_data['timestamps'][current_index] if current_index < len(forecast_data['timestamps']) else None
+                        
+                        timezone_debug['forecast_timestamps'] = {
+                            'first_timestamp': str(first_ts),
+                            'last_timestamp': str(last_ts), 
+                            'current_timestamp': str(current_ts) if current_ts else None,
+                            'current_time_index': current_index,
+                            'total_timestamps': len(forecast_data['timestamps']),
+                            'first_timestamp_type': str(type(first_ts))
+                        }
+                        
+                        # Check timezone awareness
+                        if hasattr(first_ts, 'tzinfo'):
+                            timezone_debug['forecast_timestamps']['timezone_aware'] = first_ts.tzinfo is not None
+                            timezone_debug['forecast_timestamps']['tzinfo'] = str(first_ts.tzinfo) if first_ts.tzinfo else None
+                    
+                    forecast['timezone_debug'] = timezone_debug
+                    logger.info(f"Added timezone debug info to forecast response")
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to add timezone debug info: {e}")
+                
                 # Convert all data to JSON-serializable types
                 forecast = convert_numpy_types(forecast)
                 logger.info(f"✅ API: Returning forecast data")
@@ -731,6 +792,72 @@ def create_app(homeforecast_instance):
                 
         except Exception as e:
             logger.error(f"Error getting forecast: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    @app.route('/api/debug/timezone')
+    def debug_timezone():
+        """Debug timezone configuration and time handling"""
+        try:
+            import os, time, platform
+            from datetime import datetime, timezone
+            
+            debug_info = {
+                'timestamp': datetime.now().isoformat(),
+                'container_info': {
+                    'tz_env_var': os.environ.get('TZ', 'Not set'),
+                    'system_timezone': time.tzname,
+                    'utc_offset_hours': -time.timezone / 3600,
+                    'dst_active': time.daylight,
+                    'platform': platform.system()
+                },
+                'datetime_info': {
+                    'utc_now': datetime.utcnow().isoformat() + 'Z',
+                    'local_now': datetime.now().isoformat(),
+                    'local_with_tz': datetime.now().astimezone().isoformat()
+                },
+                'homeforecast_config': {
+                    'system_timezone': getattr(app.homeforecast, 'timezone', 'Not configured'),
+                    'ha_timezone': getattr(app.homeforecast, 'ha_timezone', 'Not configured') if hasattr(app.homeforecast, 'ha_timezone') else 'Not configured'
+                }
+            }
+            
+            # Add HA client timezone if available
+            if hasattr(app.homeforecast, 'ha_client'):
+                debug_info['ha_client'] = {
+                    'has_timezone': hasattr(app.homeforecast.ha_client, 'timezone'),
+                    'timezone_str': str(getattr(app.homeforecast.ha_client, 'timezone', 'Not set'))
+                }
+            else:
+                debug_info['ha_client'] = {'available': False}
+                
+            # Test forecast data timestamp to see what timezone it's using
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                forecast = loop.run_until_complete(app.homeforecast.data_store.get_latest_forecast())
+                if forecast and 'data' in forecast:
+                    forecast_data = forecast['data']
+                    if 'timestamps' in forecast_data and forecast_data['timestamps']:
+                        first_timestamp = forecast_data['timestamps'][0]
+                        debug_info['forecast_sample'] = {
+                            'first_timestamp': str(first_timestamp),
+                            'first_timestamp_type': str(type(first_timestamp)),
+                            'current_time_index': forecast_data.get('current_time_index', 'Not set')
+                        }
+                        
+                        # Check if timestamps are timezone aware
+                        if hasattr(first_timestamp, 'tzinfo'):
+                            debug_info['forecast_sample']['timezone_aware'] = first_timestamp.tzinfo is not None
+                            debug_info['forecast_sample']['tzinfo'] = str(first_timestamp.tzinfo) if first_timestamp.tzinfo else None
+                        
+                loop.close()
+            except Exception as e:
+                debug_info['forecast_sample'] = {'error': str(e)}
+                
+            return jsonify(debug_info)
+            
+        except Exception as e:
+            logger.error(f"Error in timezone debug: {e}")
             return jsonify({'error': str(e)}), 500
             
     @app.route('/api/measurements/recent')
