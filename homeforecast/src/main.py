@@ -310,10 +310,14 @@ class HomeForecast:
                     logger.warning(f"⚠️ Could not get cached historical weather data: {hist_e}")
                     weather_forecast['historical_weather'] = []
                 
+                # Get thermostat data for accurate setpoint-based forecasting
+                thermostat_data = sensor_data.get('thermostat_data', {})
+                
                 forecast_result = await self.forecast_engine.generate_forecast(
                     sensor_data,
                     weather_forecast,
-                    getattr(self, 'timezone', 'UTC')
+                    getattr(self, 'timezone', 'UTC'),
+                    thermostat_data
                 )
                 cycle_status['steps_completed'].append('forecast_generation')
                 logger.info(f"✅ Forecast generated with keys: {list(forecast_result.keys())}")

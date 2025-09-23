@@ -43,13 +43,14 @@ class ForecastEngine:
         self.comfort_max = config.get('comfort_max_temp', 24.0)
         self.control_deadband = 0.5  # °C hysteresis
         
-    async def generate_forecast(self, current_data: Dict, weather_forecast: Dict, timezone_name: str = 'UTC') -> Dict:
+    async def generate_forecast(self, current_data: Dict, weather_forecast: Dict, timezone_name: str = 'UTC', thermostat_data: Dict = None) -> Dict:
         """
         Generate enhanced temperature forecast with historical context and trend analysis
         
         Args:
             current_data: Current sensor readings
             weather_forecast: Weather forecast data from AccuWeather (includes historical_weather if available)
+            thermostat_data: Current thermostat state and setpoint data
             
         Returns:
             Enhanced forecast results with 18-hour timeline and trend validation
@@ -60,6 +61,38 @@ class ForecastEngine:
             logger.info(f"Current indoor temp: {current_data.get('indoor_temp')}°F")
             logger.info(f"Current outdoor temp: {current_data.get('outdoor_temp')}°F")
             logger.info(f"Weather forecast keys: {list(weather_forecast.keys())}")
+            
+            # Extract thermostat setpoint and update control parameters
+            if thermostat_data:
+                target_temp = thermostat_data.get('target_temperature')
+                hvac_mode = thermostat_data.get('hvac_mode', 'off')
+                logger.info(f"🎯 Using thermostat setpoint: {target_temp}°F, Mode: {hvac_mode}")
+                
+                # Update comfort ranges based on thermostat setpoint (convert to F if needed)
+                if target_temp is not None:
+                    # Allow 5% tolerance around setpoint as mentioned by user
+                    tolerance = target_temp * 0.05  # 5% of setpoint
+                    tolerance = max(tolerance, 1.0)  # At least 1°F tolerance
+                    tolerance = min(tolerance, 3.0)  # But not more than 3°F
+                    
+                    # For heating modes, maintain temperature around setpoint
+                    if hvac_mode in ['heat', 'heat_cool', 'auto']:
+                        self.comfort_min = target_temp - tolerance
+                        self.comfort_max = target_temp + tolerance
+                    # For cooling modes, maintain temperature around setpoint  
+                    elif hvac_mode == 'cool':
+                        self.comfort_min = target_temp - tolerance
+                        self.comfort_max = target_temp + tolerance
+                    else:
+                        # HVAC off - use wider comfort range around setpoint
+                        self.comfort_min = target_temp - 2.0
+                        self.comfort_max = target_temp + 2.0
+                        
+                    logger.info(f"📊 Updated comfort range: {self.comfort_min:.1f}°F - {self.comfort_max:.1f}°F (±{tolerance:.1f}°F from {target_temp}°F setpoint)")
+                else:
+                    logger.warning("⚠️ No target temperature found in thermostat data, using config defaults")
+            else:
+                logger.warning("⚠️ No thermostat data provided, using config defaults")
             
             # Extract and analyze historical data for trend analysis
             historical_weather = weather_forecast.get('historical_weather', [])
@@ -384,6 +417,24 @@ class ForecastEngine:
             
             new_temp = state['indoor_temp'] + temp_change
             
+            # For smart control mode, validate against setpoint constraints
+            if control_mode == 'smart':
+                setpoint = (self.comfort_min + self.comfort_max) / 2
+                max_deviation = setpoint * 0.05  # 5% tolerance as specified by user
+                max_deviation = max(max_deviation, 1.0)  # At least 1°F
+                max_deviation = min(max_deviation, 3.0)  # But not more than 3°F
+                
+                # If HVAC should prevent temperature from exceeding limits
+                if state['hvac_state'] == 'cool' and new_temp > setpoint + max_deviation:
+                    # Cooling should prevent temp from going too high
+                    new_temp = setpoint + max_deviation * 0.8  # Stay within 80% of limit
+                    logger.debug(f"🛡️ Smart HVAC cooling capped temp at {new_temp:.1f}°F (setpoint: {setpoint:.1f}°F)")
+                    
+                elif state['hvac_state'] == 'heat' and new_temp < setpoint - max_deviation:
+                    # Heating should prevent temp from going too low
+                    new_temp = setpoint - max_deviation * 0.8  # Stay within 80% of limit
+                    logger.debug(f"🛡️ Smart HVAC heating capped temp at {new_temp:.1f}°F (setpoint: {setpoint:.1f}°F)")
+            
             # Apply absolute temperature bounds
             new_temp = max(0, min(150, new_temp))  # 0°F to 150°F bounds
             
@@ -417,53 +468,66 @@ class ForecastEngine:
     def _smart_hvac_control(self, current_temp: float, current_hvac: str,
                           outdoor_temp: float) -> str:
         """
-        Determine HVAC state using smart control logic
+        Determine HVAC state using smart control logic based on thermostat setpoint
         
         Args:
-            current_temp: Current indoor temperature
+            current_temp: Current indoor temperature  
             current_hvac: Current HVAC state
             outdoor_temp: Current outdoor temperature
             
         Returns:
             New HVAC state: 'heat', 'cool', or 'off'
         """
-        # Hysteresis thresholds
-        heat_on = self.comfort_min - self.control_deadband
-        heat_off = self.comfort_min + self.control_deadband
-        cool_on = self.comfort_max + self.control_deadband
-        cool_off = self.comfort_max - self.control_deadband
+        # Calculate setpoint as midpoint of comfort range
+        setpoint = (self.comfort_min + self.comfort_max) / 2
         
-        # Current state logic with hysteresis
+        # Tighter hysteresis around setpoint (0.5°F deadband)
+        heat_on = setpoint - 1.0   # Start heating 1°F below setpoint
+        heat_off = setpoint + 0.5  # Stop heating 0.5°F above setpoint
+        cool_on = setpoint + 1.0   # Start cooling 1°F above setpoint  
+        cool_off = setpoint - 0.5  # Stop cooling 0.5°F below setpoint
+        
+        # Log control decisions for debugging
+        logger.debug(f"🎯 HVAC Control: Temp={current_temp:.1f}°F, Setpoint={setpoint:.1f}°F, State={current_hvac}, " +
+                    f"Heat: {heat_on:.1f}-{heat_off:.1f}°F, Cool: {cool_off:.1f}-{cool_on:.1f}°F")
+        
+        # Current state logic with hysteresis to maintain setpoint
         if current_hvac == 'heat':
-            # Heating is on - turn off when warm enough
+            # Heating is on - turn off when we reach setpoint + small overshoot
             if current_temp >= heat_off:
+                logger.debug(f"🔥 Turning OFF heating: {current_temp:.1f}°F >= {heat_off:.1f}°F")
                 return 'off'
             else:
                 return 'heat'
                 
         elif current_hvac == 'cool':
-            # Cooling is on - turn off when cool enough
+            # Cooling is on - turn off when we reach setpoint - small undershoot
             if current_temp <= cool_off:
+                logger.debug(f"❄️ Turning OFF cooling: {current_temp:.1f}°F <= {cool_off:.1f}°F")
                 return 'off'
             else:
                 return 'cool'
                 
         else:  # HVAC is off
-            # Check if we need heating
+            # Check if we need heating to maintain setpoint
             if current_temp < heat_on:
+                logger.debug(f"🔥 Turning ON heating: {current_temp:.1f}°F < {heat_on:.1f}°F")
                 return 'heat'
-            # Check if we need cooling
+            # Check if we need cooling to maintain setpoint
             elif current_temp > cool_on:
+                logger.debug(f"❄️ Turning ON cooling: {current_temp:.1f}°F > {cool_on:.1f}°F")
                 return 'cool'
             else:
-                # Stay off - but consider predictive control
-                # If outdoor temp suggests we'll need action soon, prepare
-                if outdoor_temp < current_temp - 5 and current_temp < self.comfort_min + 1:
-                    # Cold outside, might need heat soon
-                    return 'heat' if current_temp < self.comfort_min + 0.5 else 'off'
-                elif outdoor_temp > current_temp + 5 and current_temp > self.comfort_max - 1:
-                    # Hot outside, might need cooling soon
-                    return 'cool' if current_temp > self.comfort_max - 0.5 else 'off'
+                # Stay off - temperature is within acceptable range around setpoint
+                # Consider predictive control for energy efficiency
+                temp_drift_threshold = 2.0  # °F
+                
+                if outdoor_temp < current_temp - 5 and current_temp < setpoint + 0.5:
+                    # Cold outside, might need heat soon - preheat slightly if near setpoint
+                    return 'heat' if current_temp < setpoint else 'off'
+                elif outdoor_temp > current_temp + 5 and current_temp > setpoint - 0.5:
+                    # Hot outside, might need cooling soon - precool slightly if near setpoint
+                    return 'cool' if current_temp > setpoint else 'off'
                     
                 return 'off'
                 

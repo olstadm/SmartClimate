@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.14] - 2025-09-23
+
+### Major Accuracy Improvements
+- **Setpoint-Based Forecasting**: Forecast engine now uses actual thermostat setpoint instead of hardcoded ranges
+- **Smart HVAC Trajectory Validation**: "Projected Indoor Smart HVAC" line now respects thermostat setpoint ±5% tolerance
+- **Proper Temperature Control**: Smart HVAC control prevents temperature from exceeding setpoint by more than specified tolerance
+- **Accurate "No Control" Baseline**: "No control" line properly shows temperature without any HVAC intervention
+- **Setpoint-Aware HVAC Logic**: HVAC control decisions based on actual setpoint with tighter hysteresis (0.5-1°F)
+- **Enhanced Logging**: Added detailed logging for HVAC control decisions and setpoint validation
+
+### Fixed
+- **Chart Contradictions**: Resolved issue where "Smart HVAC" line trended higher than "no control" line
+- **Setpoint Compliance**: HVAC now properly maintains temperature around actual thermostat setpoint
+- **Temperature Overshooting**: Added safety caps to prevent unrealistic temperature excursions
+
 ## [1.8.13] - 2025-09-23
 
 ### Enhanced
