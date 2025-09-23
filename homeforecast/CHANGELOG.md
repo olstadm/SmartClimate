@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.9] - 2025-09-23
+
+### Fixed
+- **Critical Bug Fix**: Resolved "string indices must be integers, not 'str'" error in weather cache system
+- Unified weather cache format to prevent dict/list conflicts between caching methods
+- Added proper cache initialization in HomeAssistantClient constructor
+- Fixed cache access errors that occurred when different caching methods created incompatible data structures
+
+### Enhanced
+- **Climate Insights Enhancement**: Climate insights now use forecast trajectory data for predictions
+- Added `_analyze_hvac_schedule_from_trajectory()` function for HVAC timing analysis based on forecast data
+- Climate insights now show future HVAC needs based on temperature forecast trajectories instead of current state only
+
+### Changed
+- Reordered Climate Action Insights UI to display "Next Climate On Time" before "Climate Action Off Time"
+- Consolidated weather caching mechanisms to use unified dictionary format
+- Added migration handling for legacy cache formats
+
 ## [1.8.1] - 2024-12-19
 
 ### Changed

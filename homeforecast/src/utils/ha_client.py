@@ -30,6 +30,8 @@ class HomeAssistantClient:
             'Authorization': f'Bearer {self.token}',
             'Content-Type': 'application/json'
         }
+        # Initialize weather cache with unified format
+        self._weather_cache = {}
         
     async def connect(self):
         """Establish connection to Home Assistant"""
@@ -924,7 +926,7 @@ class HomeAssistantClient:
             # This method can be called to cache current AccuWeather data
             # for use as "historical" data in future requests
             if not hasattr(self, '_weather_cache'):
-                self._weather_cache = []
+                self._weather_cache = {}
             
             # Validate current_outdoor exists and is a dict
             current_outdoor = weather_data.get('current_outdoor', {})
@@ -932,7 +934,11 @@ class HomeAssistantClient:
                 logger.debug(f"Skipping cache - current_outdoor is not a dict: {type(current_outdoor)}")
                 return
             
-            # Add current conditions to cache with timestamp
+            # Initialize historical cache if needed
+            if 'historical_entries' not in self._weather_cache:
+                self._weather_cache['historical_entries'] = []
+            
+            # Add current conditions to historical entries with timestamp
             cache_entry = {
                 'timestamp': datetime.now(),
                 'outdoor_temp': current_outdoor.get('temperature'),
@@ -941,12 +947,15 @@ class HomeAssistantClient:
                 'source': 'accuweather_cached'
             }
             
-            # Keep only last 24 hours of cache
+            # Keep only last 24 hours of historical cache
             cutoff_time = datetime.now() - timedelta(hours=24)
-            self._weather_cache = [entry for entry in self._weather_cache if entry['timestamp'] > cutoff_time]
-            self._weather_cache.append(cache_entry)
+            self._weather_cache['historical_entries'] = [
+                entry for entry in self._weather_cache['historical_entries'] 
+                if entry['timestamp'] > cutoff_time
+            ]
+            self._weather_cache['historical_entries'].append(cache_entry)
             
-            logger.debug(f"Weather data cached - cache size: {len(self._weather_cache)}")
+            logger.debug(f"Weather data cached - historical entries: {len(self._weather_cache['historical_entries'])}")
             
         except Exception as e:
             logger.warning(f"Error caching weather data: {e}")
@@ -1039,9 +1048,12 @@ class HomeAssistantClient:
             
         # Only cache if we have actual data
         if weather_data.get('current_outdoor') or weather_data.get('hourly_forecast'):
+            # Preserve existing historical entries when updating main cache
+            historical_entries = self._weather_cache.get('historical_entries', [])
             self._weather_cache = {
                 'data': weather_data.copy(),
-                'timestamp': datetime.now()
+                'timestamp': datetime.now(),
+                'historical_entries': historical_entries
             }
             logger.debug("Cached weather data for fallback use")
 
@@ -1051,35 +1063,56 @@ class HomeAssistantClient:
             return None
         
         try:
-            # Handle both dict and list cache formats
-            if isinstance(self._weather_cache, dict) and 'timestamp' in self._weather_cache:
-                # Dict format from _cache_weather_data
-                cache_age_hours = (datetime.now() - self._weather_cache['timestamp']).total_seconds() / 3600
-                
-                # Use cached data if less than 2 hours old
-                if cache_age_hours < 2:
-                    logger.info(f"Using weather cache from {cache_age_hours:.1f} hours ago")
-                    return self._weather_cache['data'].copy()
-                else:
-                    logger.info(f"Weather cache too old ({cache_age_hours:.1f} hours)")
+            # Handle unified dict cache format
+            if isinstance(self._weather_cache, dict):
+                # Check for main weather data cache first
+                if 'timestamp' in self._weather_cache and 'data' in self._weather_cache:
+                    cache_age_hours = (datetime.now() - self._weather_cache['timestamp']).total_seconds() / 3600
                     
-            elif isinstance(self._weather_cache, list) and self._weather_cache:
-                # List format from cache_current_weather_data - use most recent
-                recent_entry = max(self._weather_cache, key=lambda x: x.get('timestamp', datetime.min))
-                cache_age_hours = (datetime.now() - recent_entry['timestamp']).total_seconds() / 3600
+                    # Use cached data if less than 2 hours old
+                    if cache_age_hours < 2:
+                        logger.info(f"Using main weather cache from {cache_age_hours:.1f} hours ago")
+                        return self._weather_cache['data'].copy()
+                    else:
+                        logger.info(f"Main weather cache too old ({cache_age_hours:.1f} hours)")
                 
-                if cache_age_hours < 2:
-                    logger.info(f"Using recent cache entry from {cache_age_hours:.1f} hours ago")
-                    # Convert to expected format
-                    return {
-                        'current_outdoor': {
-                            'temperature': recent_entry.get('outdoor_temp'),
-                            'humidity': recent_entry.get('outdoor_humidity'),
-                            'solar_irradiance': recent_entry.get('solar_irradiance', 0)
+                # Fall back to historical entries if available
+                historical_entries = self._weather_cache.get('historical_entries', [])
+                if historical_entries:
+                    recent_entry = max(historical_entries, key=lambda x: x.get('timestamp', datetime.min))
+                    cache_age_hours = (datetime.now() - recent_entry['timestamp']).total_seconds() / 3600
+                    
+                    if cache_age_hours < 2:
+                        logger.info(f"Using recent historical cache entry from {cache_age_hours:.1f} hours ago")
+                        # Convert to expected format
+                        return {
+                            'current_outdoor': {
+                                'temperature': recent_entry.get('outdoor_temp'),
+                                'humidity': recent_entry.get('outdoor_humidity'),
+                                'solar_irradiance': recent_entry.get('solar_irradiance', 0)
+                            }
                         }
-                    }
-                else:
-                    logger.info(f"Cache entry too old ({cache_age_hours:.1f} hours)")
+                    else:
+                        logger.info(f"Historical cache entry too old ({cache_age_hours:.1f} hours)")
+                        
+            elif isinstance(self._weather_cache, list):
+                # Handle legacy list format - migrate to dict format
+                logger.info("Migrating legacy list cache format to unified dict format")
+                if self._weather_cache:
+                    recent_entry = max(self._weather_cache, key=lambda x: x.get('timestamp', datetime.min))
+                    cache_age_hours = (datetime.now() - recent_entry['timestamp']).total_seconds() / 3600
+                    
+                    if cache_age_hours < 2:
+                        logger.info(f"Using legacy cache entry from {cache_age_hours:.1f} hours ago")
+                        return {
+                            'current_outdoor': {
+                                'temperature': recent_entry.get('outdoor_temp'),
+                                'humidity': recent_entry.get('outdoor_humidity'),
+                                'solar_irradiance': recent_entry.get('solar_irradiance', 0)
+                            }
+                        }
+                # Migrate to new format
+                self._weather_cache = {'historical_entries': self._weather_cache if isinstance(self._weather_cache, list) else []}
             else:
                 logger.warning(f"Unknown weather cache format: {type(self._weather_cache)}")
                 
