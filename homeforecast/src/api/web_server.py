@@ -224,7 +224,19 @@ def _analyze_optimal_hvac_timing(idle_trajectory, controlled_trajectory, current
             
         logger.info(f"🔍 Analyzing optimal HVAC timing - Mode: {hvac_mode}, Current: {current_temp}°F, " +
                    f"Comfort range: {comfort_min}-{comfort_max}°F")
-                   
+        
+        # Debug: Log uncontrolled temperature trajectory for physics validation
+        if idle_trajectory and len(idle_trajectory) > 0:
+            idle_temps = [point.get('indoor_temp', current_temp) for point in idle_trajectory[:10]]  # First 10 points
+            logger.info(f"📊 Uncontrolled temp trend (next 2.5hrs): {idle_temps[:6]} ...")
+            
+            # Physics check: ensure uncontrolled temps are realistic
+            if len(idle_temps) >= 2:
+                temp_change = idle_temps[1] - idle_temps[0]  # Change in first step
+                if abs(temp_change) > 1.0:  # > 1°F change in 5 minutes is suspicious
+                    logger.warning(f"⚠️ Physics Alert: Uncontrolled temp shows {temp_change:.2f}°F change in 5min " +
+                                 f"({idle_temps[0]:.1f}°F → {idle_temps[1]:.1f}°F)")
+        
         turn_on_time = None
         turn_off_time = None
         
@@ -779,7 +791,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '1.9.1',
+                'addon_version': '1.9.2',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -816,7 +828,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '1.9.1',
+                'version': '1.9.2',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),

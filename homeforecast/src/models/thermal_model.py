@@ -25,6 +25,8 @@ class RecursiveLeastSquares:
         """
         self.n_params = n_params
         self.lambda_ff = forgetting_factor
+        self.base_lambda = forgetting_factor  # Store original value
+        self.update_count = 0  # Track number of updates for adaptive learning
         
         # Initialize parameters
         self.theta = np.zeros(n_params)  # Parameter vector
@@ -41,6 +43,19 @@ class RecursiveLeastSquares:
         Returns:
             Updated parameter vector
         """
+        self.update_count += 1
+        
+        # Adaptive forgetting factor for aggressive early learning
+        if self.update_count < 50:
+            # Early learning stage: aggressive adaptation
+            self.lambda_ff = 0.92  # More aggressive learning
+        elif self.update_count < 100:
+            # Intermediate stage: moderate adaptation
+            self.lambda_ff = 0.96
+        else:
+            # Mature stage: conservative adaptation
+            self.lambda_ff = self.base_lambda
+        
         # Prediction error
         y_pred = np.dot(phi, self.theta)
         e = y - y_pred
@@ -516,11 +531,39 @@ class ThermalModel:
             
             dT_dt += correction
         
-        # Apply reasonable bounds to temperature change rate
-        # Maximum realistic HVAC heating/cooling: ±15°F/hour
-        # Maximum realistic natural drift: ±5°F/hour
-        max_rate = 20.0  # °F/hour absolute maximum
-        dT_dt = max(-max_rate, min(max_rate, dT_dt))
+        # Apply physics-based constraints to temperature change rate
+        if hvac_state in ['off', 'idle']:
+            # No HVAC: Physics-based natural drift constraints
+            temp_diff = t_out - t_in
+            
+            # Natural drift should move towards outdoor temperature
+            if temp_diff > 0:
+                # Outdoor warmer: indoor should warm up (positive dT_dt)
+                dT_dt = max(0, dT_dt)  # Prevent cooling when outdoor is warmer
+                max_natural_rate = min(5.0, abs(temp_diff) * 0.3)  # Proportional to temp difference
+                dT_dt = min(dT_dt, max_natural_rate)
+            elif temp_diff < 0:
+                # Outdoor cooler: indoor should cool down (negative dT_dt)
+                dT_dt = min(0, dT_dt)  # Prevent heating when outdoor is cooler
+                max_natural_rate = min(5.0, abs(temp_diff) * 0.3)
+                dT_dt = max(dT_dt, -max_natural_rate)
+            else:
+                # Temperatures equal: minimal change
+                max_natural_rate = 0.5  # Very slow drift at equilibrium
+                dT_dt = max(-max_natural_rate, min(max_natural_rate, dT_dt))
+                
+            # Log physics corrections for uncontrolled scenarios
+            if len(self.parameter_history) < 50:  # Early learning stage
+                logger.info(f"🔬 Physics constraint (no HVAC): T_in={t_in:.1f}°F, T_out={t_out:.1f}°F, " +
+                          f"dT_dt={dT_dt:.3f}°F/hr (diff={temp_diff:.1f}°F)")
+        else:
+            # HVAC active: Allow stronger heating/cooling but still bounded
+            max_hvac_rate = 15.0  # °F/hour for active HVAC
+            dT_dt = max(-max_hvac_rate, min(max_hvac_rate, dT_dt))
+        
+        # Absolute maximum bounds
+        absolute_max = 20.0  # °F/hour absolute maximum
+        dT_dt = max(-absolute_max, min(absolute_max, dT_dt))
         
         # Log extreme values for debugging
         if abs(dT_dt) > 10.0:
@@ -594,17 +637,18 @@ class ThermalModel:
             self._set_default_parameters()
             
     def _set_default_parameters(self):
-        """Set reasonable default parameters"""
+        """Set reasonable default parameters with conservative uncontrolled behavior"""
         # Default values based on typical home characteristics (Fahrenheit)
+        # More conservative parameters to prevent unrealistic temperature drops
         self.rls.theta = np.array([
-            0.1,    # a: 1/τ (τ = 10 hours typical)
+            0.15,   # a: 1/τ (τ = 6.7 hours - faster thermal response)
             3.6,    # k_H: 3.6°F/hour heating rate (2°C/hour * 1.8)
             -4.5,   # k_C: -4.5°F/hour cooling rate (-2.5°C/hour * 1.8)
-            0.09,   # b: Small baseline drift (0.05°C/hour * 1.8)
-            0.036,  # k_E: Small enthalpy effect (0.02°C/hour * 1.8)
-            0.9     # k_S: Moderate solar gain (0.5°C/hour * 1.8)
+            0.0,    # b: Zero baseline drift (conservative - no spontaneous cooling)
+            0.02,   # k_E: Minimal enthalpy effect (more conservative)
+            0.5     # k_S: Moderate solar gain (0.28°C/hour * 1.8)
         ])
-        logger.info("Using default thermal model parameters")
+        logger.info("✅ Using conservative default thermal model parameters (no spontaneous cooling)")
         
     async def retrain_ml_correction(self):
         """Retrain the ML correction model"""
@@ -643,16 +687,38 @@ class ThermalModel:
         }
         
     def _check_parameter_convergence(self) -> bool:
-        """Check if parameters have converged"""
-        if len(self.parameter_history) < 50:
+        """Check if parameters have converged using adaptive criteria"""
+        sample_count = len(self.parameter_history)
+        
+        # Adaptive convergence criteria based on learning stage
+        if sample_count < 20:
+            return False  # Need minimum samples
+        elif sample_count < 50:
+            # Early stage: looser convergence criteria
+            min_samples = 20
+            convergence_threshold = 0.05  # More lenient
+        else:
+            # Mature stage: strict convergence criteria
+            min_samples = 50
+            convergence_threshold = 0.01  # Strict
+            
+        if sample_count < min_samples:
             return False
             
-        # Check variance of parameters over last 50 updates
-        recent_params = np.array([p['parameters'] for p in self.parameter_history[-50:]])
+        # Check variance of parameters over recent updates
+        recent_params = np.array([p['parameters'] for p in self.parameter_history[-min_samples:]])
         param_std = np.std(recent_params, axis=0)
         
-        # Parameters considered converged if std < 0.01
-        return np.all(param_std < 0.01)
+        # Check if all parameters are stable
+        converged = np.all(param_std < convergence_threshold)
+        
+        # Log convergence status during early learning
+        if sample_count < 100 and sample_count % 10 == 0:
+            logger.info(f"🎯 Learning Progress: {sample_count} samples, " +
+                       f"param_std={param_std.max():.4f}, threshold={convergence_threshold:.4f}, " +
+                       f"converged={converged}")
+        
+        return converged
     
     def reset_model(self):
         """Reset thermal model to initial state"""
