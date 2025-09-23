@@ -491,6 +491,14 @@ class HomeForecastDashboard {
         if (!ctx) return;
 
         console.log('Updating forecast chart with enhanced historical/forecast separation:', data);
+        
+        // 🔍 DEBUG: Browser timezone information
+        const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const currentTime = new Date();
+        console.log('🌍 Browser timezone:', browserTz);
+        console.log('🕒 Current browser time:', currentTime.toLocaleString());
+        console.log('🕒 Current browser time (ISO):', currentTime.toISOString());
+        console.log('🕒 Current browser time (local):', currentTime.toString());
 
         // Process HVAC operation periods for annotations
         const hvacPeriods = this.extractHvacPeriods(data);
@@ -504,12 +512,20 @@ class HomeForecastDashboard {
         if (data.historical_data && data.forecast_data) {
             console.log(`📊 Using separated data structure - ${data.historical_data.timestamps?.length || 0} historical + ${data.forecast_data.timestamps?.length || 0} forecast points`);
             
-            // Create combined timeline
+            // Create combined timeline with proper timezone handling
+            console.log('📊 DEBUG: Sample timestamps from API:');
+            console.log('Historical sample:', data.historical_data.timestamps?.[0]);
+            console.log('Forecast sample:', data.forecast_data.timestamps?.[0]);
+            console.log('Timeline separator:', data.timeline_separator?.separator_timestamp);
+            
             const historicalLabels = (data.historical_data.timestamps || []).map(ts => {
+                // Parse timezone-aware timestamp properly
                 const date = new Date(ts);
+                console.log(`Historical: ${ts} -> ${date.toLocaleString()} (browser interprets as ${date.toISOString()})`);
                 return date.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit', hour12: true });
             });
             const forecastLabels = (data.forecast_data.timestamps || []).map(ts => {
+                // Parse timezone-aware timestamp properly
                 const date = new Date(ts);
                 return date.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit', hour12: true });
             });

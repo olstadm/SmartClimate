@@ -645,7 +645,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '1.8.25',
+                'addon_version': '1.8.26',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -682,7 +682,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '1.8.25',
+                'version': '1.8.26',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
@@ -851,22 +851,9 @@ def create_app(homeforecast_instance):
                 except Exception as e:
                     logger.warning(f"Failed to add timezone debug info: {e}")
                 
-                # Convert timestamps to local timezone for proper chart display
-                try:
-                    # Get the Home Assistant timezone from ha_client
-                    target_timezone = 'America/Los_Angeles'  # Default fallback
-                    if hasattr(app.homeforecast, 'ha_client') and hasattr(app.homeforecast.ha_client, 'timezone'):
-                        target_timezone = str(app.homeforecast.ha_client.timezone)
-                    
-                    logger.info(f"Converting timestamps to local timezone: {target_timezone}")
-                    
-                    # Convert timestamps in forecast data
-                    if 'data' in forecast:
-                        forecast['data'] = convert_timestamps_to_local_timezone(forecast['data'], target_timezone)
-                        logger.info("✅ Timestamps converted to local timezone for frontend display")
-                    
-                except Exception as e:
-                    logger.warning(f"Failed to convert timestamps to local timezone: {e}")
+                # NOTE: Timestamps remain in original timezone-aware format (UTC+offset) 
+                # Let the frontend handle timezone conversion based on browser timezone
+                # This prevents double timezone conversion issues
                 
                 # Convert all data to JSON-serializable types
                 forecast = convert_numpy_types(forecast)
