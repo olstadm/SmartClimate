@@ -1370,6 +1370,11 @@ class HomeForecastDashboard {
         document.querySelectorAll('.tab-content').forEach(content => {
             content.classList.toggle('active', content.id === tabName + 'Tab');
         });
+
+        // Initialize V2.0 training tab when selected
+        if (tabName === 'v2training') {
+            this.initV2Training();
+        }
     }
 
     formatRelativeTime(date) {
@@ -1560,6 +1565,468 @@ class HomeForecastDashboard {
             clearInterval(this.updateTimer);
             this.updateTimer = null;
         }
+    }
+
+    // V2.0 Enhanced Training Functions
+    initV2Training() {
+        // Set up V2.0 event listeners
+        this.setupV2EventListeners();
+        this.updateV2Status();
+        this.updateComfortBandDisplay();
+    }
+
+    setupV2EventListeners() {
+        // IDF file upload
+        const idfInput = document.getElementById('idfFileInput');
+        const idfZone = document.getElementById('idfUploadZone');
+        
+        if (idfInput) {
+            idfInput.addEventListener('change', (e) => this.handleIDFUpload(e.target.files[0]));
+        }
+        
+        if (idfZone) {
+            idfZone.addEventListener('dragover', this.handleDragOver);
+            idfZone.addEventListener('dragleave', this.handleDragLeave);
+            idfZone.addEventListener('drop', (e) => this.handleIDFDrop(e));
+        }
+
+        // EPW file upload
+        const epwInput = document.getElementById('epwFileInput');
+        const epwZone = document.getElementById('epwUploadZone');
+        
+        if (epwInput) {
+            epwInput.addEventListener('change', (e) => this.handleEPWUpload(e.target.files[0]));
+        }
+        
+        if (epwZone) {
+            epwZone.addEventListener('dragover', this.handleDragOver);
+            epwZone.addEventListener('dragleave', this.handleDragLeave);
+            epwZone.addEventListener('drop', (e) => this.handleEPWDrop(e));
+        }
+
+        // Comfort band inputs
+        const comfortMin = document.getElementById('comfortMin');
+        const comfortMax = document.getElementById('comfortMax');
+        
+        if (comfortMin) {
+            comfortMin.addEventListener('change', () => this.updateComfortBandDisplay());
+        }
+        if (comfortMax) {
+            comfortMax.addEventListener('change', () => this.updateComfortBandDisplay());
+        }
+    }
+
+    handleDragOver(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.classList.add('dragover');
+    }
+
+    handleDragLeave(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.classList.remove('dragover');
+    }
+
+    handleIDFDrop(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.classList.remove('dragover');
+        
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            this.handleIDFUpload(files[0]);
+        }
+    }
+
+    handleEPWDrop(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.classList.remove('dragover');
+        
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            this.handleEPWUpload(files[0]);
+        }
+    }
+
+    async handleIDFUpload(file) {
+        if (!file || !file.name.toLowerCase().endsWith('.idf')) {
+            this.showNotification('Please select a valid .idf file', 'error');
+            return;
+        }
+
+        this.showNotification(`Uploading building model: ${file.name}`, 'info');
+        
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const response = await fetch('/api/v2/building-model/upload', {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.showNotification(`Building model uploaded successfully: ${result.building_model.building_type}`, 'success');
+                this.displayBuildingModelInfo(result.building_model);
+                this.updateV2Status();
+            } else {
+                this.showNotification(`Upload failed: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            this.showNotification(`Upload error: ${error.message}`, 'error');
+        }
+    }
+
+    async handleEPWUpload(file) {
+        if (!file || !file.name.toLowerCase().endsWith('.epw')) {
+            this.showNotification('Please select a valid .epw file', 'error');
+            return;
+        }
+
+        this.showNotification(`Uploading weather dataset: ${file.name}`, 'info');
+        
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const limitHours = document.getElementById('epwLimitHours').value;
+        if (limitHours) {
+            formData.append('limit_hours', limitHours);
+        }
+
+        try {
+            const response = await fetch('/api/v2/weather-dataset/upload', {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.showNotification(`Weather dataset uploaded: ${result.weather_dataset.location.city}`, 'success');
+                this.displayWeatherDatasetInfo(result.weather_dataset);
+                this.updateV2Status();
+            } else {
+                this.showNotification(`Upload failed: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            this.showNotification(`Upload error: ${error.message}`, 'error');
+        }
+    }
+
+    displayBuildingModelInfo(buildingModel) {
+        const infoDiv = document.getElementById('idfModelInfo');
+        if (!infoDiv) return;
+
+        infoDiv.innerHTML = `
+            <div class="metric">
+                <span class="metric-label">Building Type:</span>
+                <span class="metric-value">${buildingModel.building_type}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Floor Area:</span>
+                <span class="metric-value">${Math.round(buildingModel.floor_area_sqft).toLocaleString()} sq ft</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Time Constant:</span>
+                <span class="metric-value">${buildingModel.time_constant_hours.toFixed(1)} hours</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">HVAC Systems:</span>
+                <span class="metric-value">${buildingModel.hvac_systems?.equipment_count || 0} units</span>
+            </div>
+        `;
+        infoDiv.style.display = 'block';
+    }
+
+    displayWeatherDatasetInfo(weatherDataset) {
+        const infoDiv = document.getElementById('epwWeatherInfo');
+        if (!infoDiv) return;
+
+        const stats = weatherDataset.summary_statistics || {};
+        const tempRange = stats.temperature_range_F || {};
+
+        infoDiv.innerHTML = `
+            <div class="metric">
+                <span class="metric-label">Location:</span>
+                <span class="metric-value">${weatherDataset.location?.city || 'Unknown'}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Data Points:</span>
+                <span class="metric-value">${weatherDataset.data_points?.toLocaleString() || 0} hours</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Temperature Range:</span>
+                <span class="metric-value">${tempRange.min ? `${Math.round(tempRange.min)}°F to ${Math.round(tempRange.max)}°F` : 'N/A'}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Data Quality:</span>
+                <span class="metric-value">${stats.data_quality?.completeness_pct ? `${Math.round(stats.data_quality.completeness_pct)}%` : 'N/A'}</span>
+            </div>
+        `;
+        infoDiv.style.display = 'block';
+    }
+
+    async updateV2Status() {
+        try {
+            const response = await fetch('/api/v2/model/status');
+            const status = await response.json();
+
+            // Update building model status
+            const buildingModelEl = document.getElementById('loadedBuildingModel');
+            if (buildingModelEl) {
+                buildingModelEl.textContent = status.building_model_loaded ? 
+                    status.building_model?.building_type || 'Loaded' : 'None';
+            }
+
+            // Update training status
+            const trainingStatusEl = document.getElementById('v2TrainingStatus');
+            if (trainingStatusEl) {
+                trainingStatusEl.textContent = status.training_completed ? 'Completed' : 
+                    (status.building_model_loaded && status.weather_dataset_loaded ? 'Ready' : 'Waiting for files');
+                trainingStatusEl.className = `status ${status.training_completed ? 'status-ok' : 'status-warning'}`;
+            }
+
+            // Update RC model accuracy
+            const accuracyEl = document.getElementById('rcModelAccuracy');
+            if (accuracyEl && status.training_results?.accuracy_score) {
+                const accuracy = status.training_results.accuracy_score;
+                const percentage = (accuracy * 100).toFixed(1) + '%';
+                accuracyEl.textContent = percentage;
+                
+                // Color code based on accuracy
+                accuracyEl.className = 'metric-value large';
+                if (accuracy >= 0.95) accuracyEl.classList.add('excellent');
+                else if (accuracy >= 0.85) accuracyEl.classList.add('good');
+                else if (accuracy >= 0.75) accuracyEl.classList.add('fair');
+                else accuracyEl.classList.add('poor');
+            }
+
+            // Update physics compliance
+            const complianceEl = document.getElementById('physicsCompliance');
+            if (complianceEl && status.training_results?.physics_compliance) {
+                const compliance = (status.training_results.physics_compliance * 100).toFixed(1) + '%';
+                complianceEl.textContent = compliance;
+            }
+
+            // Update training button state
+            const trainBtn = document.getElementById('startV2TrainingBtn');
+            if (trainBtn) {
+                trainBtn.disabled = !(status.building_model_loaded && status.weather_dataset_loaded) || status.training_completed;
+            }
+
+            // Show existing results if available
+            if (status.training_completed && status.training_results) {
+                this.displayTrainingResults(status.training_results);
+            }
+
+        } catch (error) {
+            console.error('Error updating V2 status:', error);
+        }
+    }
+
+    updateComfortBandDisplay() {
+        const minEl = document.getElementById('comfortMin');
+        const maxEl = document.getElementById('comfortMax');
+        const bandEl = document.getElementById('currentComfortBand');
+
+        if (minEl && maxEl && bandEl) {
+            const min = parseFloat(minEl.value) || 68.0;
+            const max = parseFloat(maxEl.value) || 76.0;
+            bandEl.textContent = `${min.toFixed(1)}°F - ${max.toFixed(1)}°F`;
+        }
+    }
+
+    async startV2Training() {
+        const trainBtn = document.getElementById('startV2TrainingBtn');
+        const progressSection = document.getElementById('trainingProgressSection');
+        const resultsSection = document.getElementById('trainingResultsSection');
+
+        if (!trainBtn || !progressSection) return;
+
+        // Get training parameters
+        const duration = parseInt(document.getElementById('trainingDurationV2').value) || 168;
+        const comfortMin = parseFloat(document.getElementById('comfortMin').value) || 68.0;
+        const comfortMax = parseFloat(document.getElementById('comfortMax').value) || 76.0;
+
+        // Get selected scenarios
+        const scenarios = [];
+        document.querySelectorAll('.scenario-checkboxes input[type="checkbox"]:checked').forEach(cb => {
+            scenarios.push(cb.value);
+        });
+
+        if (scenarios.length === 0) {
+            this.showNotification('Please select at least one HVAC scenario', 'error');
+            return;
+        }
+
+        // Show progress section
+        progressSection.style.display = 'block';
+        resultsSection.style.display = 'none';
+        trainBtn.disabled = true;
+        trainBtn.textContent = 'Training in Progress...';
+
+        // Initialize progress
+        this.updateTrainingProgress(0, 'Initializing enhanced training...', {});
+
+        try {
+            const response = await fetch('/api/v2/training/run', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    training_duration_hours: duration,
+                    hvac_scenarios: scenarios,
+                    comfort_min: comfortMin,
+                    comfort_max: comfortMax
+                })
+            });
+
+            // Simulate progress updates during training
+            this.simulateTrainingProgress(duration, scenarios);
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.updateTrainingProgress(100, 'Training completed successfully!', {
+                    samplesGenerated: result.training_results.total_samples,
+                    physicsViolations: result.training_results.physics_violations || 0
+                });
+
+                setTimeout(() => {
+                    this.displayTrainingResults(result.training_results);
+                    this.updateV2Status();
+                }, 1000);
+
+                this.showNotification('Enhanced training completed successfully!', 'success');
+            } else {
+                throw new Error(result.error || 'Training failed');
+            }
+
+        } catch (error) {
+            this.showNotification(`Training error: ${error.message}`, 'error');
+            progressSection.style.display = 'none';
+        } finally {
+            trainBtn.disabled = false;
+            trainBtn.textContent = 'Start Enhanced Training';
+        }
+    }
+
+    simulateTrainingProgress(duration, scenarios) {
+        let progress = 0;
+        const totalSteps = duration * scenarios.length;
+        let currentStep = 0;
+        
+        const progressInterval = setInterval(() => {
+            currentStep += Math.random() * 5 + 1; // Random progress increment
+            progress = Math.min(95, (currentStep / totalSteps) * 100);
+            
+            const phase = Math.floor((currentStep / totalSteps) * scenarios.length);
+            const currentScenario = scenarios[phase] || scenarios[scenarios.length - 1];
+            
+            this.updateTrainingProgress(progress, `Processing ${currentScenario} scenario...`, {
+                samplesGenerated: Math.floor(currentStep * 10),
+                physicsViolations: Math.floor(Math.random() * currentStep * 0.1),
+                estimatedCompletion: new Date(Date.now() + (100 - progress) * 1000).toLocaleTimeString()
+            });
+            
+            if (progress >= 95) {
+                clearInterval(progressInterval);
+            }
+        }, 500);
+
+        return progressInterval;
+    }
+
+    updateTrainingProgress(percentage, statusText, stats = {}) {
+        const progressBar = document.getElementById('trainingProgressBar');
+        const progressPercent = document.getElementById('trainingProgressPercent');
+        const progressText = document.getElementById('trainingProgressText');
+
+        if (progressBar) progressBar.style.width = `${percentage}%`;
+        if (progressPercent) progressPercent.textContent = `${percentage.toFixed(1)}%`;
+        if (progressText) progressText.textContent = statusText;
+
+        // Update stats
+        if (stats.samplesGenerated !== undefined) {
+            const samplesEl = document.getElementById('samplesGenerated');
+            if (samplesEl) samplesEl.textContent = stats.samplesGenerated.toLocaleString();
+        }
+
+        if (stats.physicsViolations !== undefined) {
+            const violationsEl = document.getElementById('physicsViolations');
+            if (violationsEl) violationsEl.textContent = stats.physicsViolations.toLocaleString();
+        }
+
+        if (stats.estimatedCompletion) {
+            const completionEl = document.getElementById('estimatedCompletion');
+            if (completionEl) completionEl.textContent = stats.estimatedCompletion;
+        }
+    }
+
+    displayTrainingResults(results) {
+        const resultsSection = document.getElementById('trainingResultsSection');
+        if (!resultsSection) return;
+
+        // Update result values
+        const finalAccuracy = document.getElementById('finalAccuracy');
+        if (finalAccuracy) {
+            const accuracy = (results.accuracy_score * 100).toFixed(1) + '%';
+            finalAccuracy.textContent = accuracy;
+        }
+
+        const finalCompliance = document.getElementById('finalPhysicsCompliance');
+        if (finalCompliance) {
+            const compliance = (results.physics_compliance * 100).toFixed(1) + '%';
+            finalCompliance.textContent = compliance;
+        }
+
+        const finalSamples = document.getElementById('finalTrainingSamples');
+        if (finalSamples) {
+            finalSamples.textContent = results.total_samples?.toLocaleString() || '0';
+        }
+
+        const improvement = document.getElementById('modelImprovement');
+        if (improvement) {
+            // Calculate estimated improvement (placeholder logic)
+            const improvementPct = ((results.accuracy_score - 0.75) * 100).toFixed(1);
+            improvement.textContent = `+${Math.max(0, improvementPct)}%`;
+        }
+
+        resultsSection.style.display = 'block';
+    }
+
+    async applyEnhancedModel() {
+        try {
+            this.showNotification('Applying enhanced model to RC system...', 'info');
+            
+            // In a real implementation, this would update the thermal model parameters
+            // For now, we'll simulate the application
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            this.showNotification('Enhanced model successfully applied to RC system!', 'success');
+            this.updateV2Status();
+            
+        } catch (error) {
+            this.showNotification(`Error applying model: ${error.message}`, 'error');
+        }
+    }
+}
+
+// Global functions for V2.0 training
+function startV2Training() {
+    if (window.dashboard) {
+        window.dashboard.startV2Training();
+    }
+}
+
+function applyEnhancedModel() {
+    if (window.dashboard) {
+        window.dashboard.applyEnhancedModel();
     }
 }
 

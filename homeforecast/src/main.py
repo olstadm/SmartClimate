@@ -116,6 +116,12 @@ class HomeForecast:
         self.web_app = None
         self.running = False
         
+        # V2.0 Enhanced Training Components
+        self.building_model = None          # DOE building model from IDF file
+        self.weather_dataset = None         # EPW weather dataset
+        self.training_results = None        # Enhanced training results
+        self.enhanced_training_system = None  # Enhanced training system instance
+        
     async def initialize(self):
         """Initialize all components"""
         logger.info("Initializing HomeForecast...")

@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HomeForecast v2.0 - Building Model Manager</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <style>
+        .v2-container {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+        
+        .v2-header {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #2c3e50;
+        }
+        
+        .v2-section {
+            background: white;
+            padding: 25px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .upload-area {
+            border: 2px dashed #3498db;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            background: #f8f9fa;
+            margin: 15px 0;
+            transition: all 0.3s ease;
+        }
+        
+        .upload-area:hover {
+            border-color: #2980b9;
+            background: #e3f2fd;
+        }
+        
+        .upload-area.dragover {
+            border-color: #27ae60;
+            background: #e8f5e8;
+        }
+        
+        .file-input {
+            display: none;
+        }
+        
+        .upload-btn {
+            background: #3498db;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s ease;
+        }
+        
+        .upload-btn:hover {
+            background: #2980b9;
+        }
+        
+        .status-card {
+            display: inline-block;
+            padding: 15px 20px;
+            margin: 10px;
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+            min-width: 200px;
+        }
+        
+        .status-success { background: #27ae60; }
+        .status-warning { background: #f39c12; }
+        .status-error { background: #e74c3c; }
+        .status-info { background: #3498db; }
+        
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #ecf0f1;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3498db, #27ae60);
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+        
+        .model-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        
+        .info-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #3498db;
+        }
+        
+        .info-card h4 {
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+        }
+        
+        .info-card .value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #3498db;
+        }
+        
+        .training-controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .control-group label {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        .control-input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 150px;
+        }
+        
+        .scenario-checkboxes {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .scenario-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .train-btn {
+            background: #27ae60;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: background 0.3s ease;
+        }
+        
+        .train-btn:hover {
+            background: #229954;
+        }
+        
+        .train-btn:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+        }
+        
+        .log-output {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            margin: 20px 0;
+        }
+        
+        .back-link {
+            display: inline-block;
+            margin: 20px 0;
+            color: #3498db;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        
+        .back-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="v2-container">
+        <div class="v2-header">
+            <h1>🏗️ HomeForecast v2.0</h1>
+            <h2>DOE Building Model & Weather Dataset Manager</h2>
+            <p>Upload DOE Residential Prototype Building Models (IDF) and EPW weather files for enhanced thermal predictions</p>
+        </div>
+        
+        <!-- System Status Overview -->
+        <div class="v2-section">
+            <h3>📊 System Status</h3>
+            <div id="systemStatus">
+                <div class="status-card status-info">
+                    <div>🏗️ Building Model</div>
+                    <div id="buildingModelStatus">Not Loaded</div>
+                </div>
+                <div class="status-card status-info">
+                    <div>🌤️ Weather Dataset</div>
+                    <div id="weatherDatasetStatus">Not Loaded</div>
+                </div>
+                <div class="status-card status-info">
+                    <div>🎯 Training Status</div>
+                    <div id="trainingStatus">Not Started</div>
+                </div>
+                <div class="status-card status-info">
+                    <div>⚡ System Ready</div>
+                    <div id="systemReady">No</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Building Model Upload Section -->
+        <div class="v2-section">
+            <h3>🏗️ DOE Building Model Upload</h3>
+            <p>Upload a DOE Residential Prototype Building Model (IDF file) to extract thermal characteristics for accurate building physics modeling.</p>
+            
+            <div class="upload-area" id="buildingUploadArea">
+                <div>
+                    <h4>📁 Drop IDF File Here or Click to Browse</h4>
+                    <p>Supported: .idf files (EnergyPlus Input Data Files)</p>
+                    <button class="upload-btn" onclick="document.getElementById('buildingFileInput').click()">
+                        Choose IDF File
+                    </button>
+                    <input type="file" id="buildingFileInput" class="file-input" accept=".idf" onchange="uploadBuildingModel(this.files[0])">
+                </div>
+            </div>
+            
+            <div id="buildingModelInfo" class="model-info" style="display: none;">
+                <!-- Building model information will be populated here -->
+            </div>
+        </div>
+        
+        <!-- Weather Dataset Upload Section -->
+        <div class="v2-section">
+            <h3>🌤️ EPW Weather Dataset Upload</h3>
+            <p>Upload an EnergyPlus Weather (EPW) file for local climate training data and validation.</p>
+            
+            <div class="upload-area" id="weatherUploadArea">
+                <div>
+                    <h4>📁 Drop EPW File Here or Click to Browse</h4>
+                    <p>Supported: .epw files (EnergyPlus Weather Files)</p>
+                    <button class="upload-btn" onclick="document.getElementById('weatherFileInput').click()">
+                        Choose EPW File
+                    </button>
+                    <input type="file" id="weatherFileInput" class="file-input" accept=".epw" onchange="uploadWeatherDataset(this.files[0])">
+                </div>
+            </div>
+            
+            <div class="control-group" style="margin-top: 15px;">
+                <label for="limitHours">Limit Hours (optional, for testing):</label>
+                <input type="number" id="limitHours" class="control-input" placeholder="e.g., 168 for 1 week" min="1" max="8760">
+            </div>
+            
+            <div id="weatherDatasetInfo" class="model-info" style="display: none;">
+                <!-- Weather dataset information will be populated here -->
+            </div>
+        </div>
+        
+        <!-- Enhanced Training Section -->
+        <div class="v2-section">
+            <h3>🎯 Enhanced Training System</h3>
+            <p>Run comprehensive training using your building model and weather data to create physics-accurate thermal predictions.</p>
+            
+            <div class="training-controls">
+                <div class="control-group">
+                    <label for="trainingDuration">Training Duration (hours):</label>
+                    <input type="number" id="trainingDuration" class="control-input" value="168" min="24" max="8760">
+                </div>
+                
+                <div class="control-group">
+                    <label>HVAC Scenarios:</label>
+                    <div class="scenario-checkboxes">
+                        <div class="scenario-checkbox">
+                            <input type="checkbox" id="scenarioHeating" value="heating" checked>
+                            <label for="scenarioHeating">Heating</label>
+                        </div>
+                        <div class="scenario-checkbox">
+                            <input type="checkbox" id="scenarioCooling" value="cooling" checked>
+                            <label for="scenarioCooling">Cooling</label>
+                        </div>
+                        <div class="scenario-checkbox">
+                            <input type="checkbox" id="scenarioOff" value="off" checked>
+                            <label for="scenarioOff">HVAC Off</label>
+                        </div>
+                        <div class="scenario-checkbox">
+                            <input type="checkbox" id="scenarioMixed" value="mixed" checked>
+                            <label for="scenarioMixed">Mixed Mode</label>
+                        </div>
+                    </div>
+                </div>
+                
+                <button class="train-btn" id="runTrainingBtn" onclick="runEnhancedTraining()" disabled>
+                    🚀 Run Enhanced Training
+                </button>
+            </div>
+            
+            <div class="progress-bar" id="trainingProgress" style="display: none;">
+                <div class="progress-fill" id="trainingProgressFill"></div>
+            </div>
+            
+            <div id="trainingResults" style="display: none;">
+                <!-- Training results will be populated here -->
+            </div>
+        </div>
+        
+        <!-- Log Output -->
+        <div class="v2-section">
+            <h3>📝 System Log</h3>
+            <div class="log-output" id="logOutput">
+                HomeForecast v2.0 Building Model Manager Ready
+                Upload your DOE building model and EPW weather file to get started...
+            </div>
+        </div>
+        
+        <a href="/" class="back-link">← Back to Main Dashboard</a>
+    </div>
+
+    <script>
+        let systemState = {
+            buildingModelLoaded: false,
+            weatherDatasetLoaded: false,
+            trainingCompleted: false
+        };
+
+        // Initialize drag and drop handlers
+        document.addEventListener('DOMContentLoaded', function() {
+            setupDragAndDrop();
+            updateSystemStatus();
+            checkModelStatus();
+        });
+
+        function setupDragAndDrop() {
+            // Building model drag and drop
+            const buildingArea = document.getElementById('buildingUploadArea');
+            buildingArea.addEventListener('dragover', handleDragOver);
+            buildingArea.addEventListener('dragleave', handleDragLeave);
+            buildingArea.addEventListener('drop', (e) => handleDrop(e, 'building'));
+
+            // Weather dataset drag and drop
+            const weatherArea = document.getElementById('weatherUploadArea');
+            weatherArea.addEventListener('dragover', handleDragOver);
+            weatherArea.addEventListener('dragleave', handleDragLeave);
+            weatherArea.addEventListener('drop', (e) => handleDrop(e, 'weather'));
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.currentTarget.classList.add('dragover');
+        }
+
+        function handleDragLeave(e) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('dragover');
+        }
+
+        function handleDrop(e, type) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('dragover');
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                if (type === 'building') {
+                    uploadBuildingModel(files[0]);
+                } else if (type === 'weather') {
+                    uploadWeatherDataset(files[0]);
+                }
+            }
+        }
+
+        function logMessage(message) {
+            const logOutput = document.getElementById('logOutput');
+            const timestamp = new Date().toLocaleTimeString();
+            logOutput.textContent += `\n${timestamp} - ${message}`;
+            logOutput.scrollTop = logOutput.scrollHeight;
+        }
+
+        function updateSystemStatus() {
+            const buildingStatus = document.getElementById('buildingModelStatus');
+            const weatherStatus = document.getElementById('weatherDatasetStatus');
+            const trainingStatus = document.getElementById('trainingStatus');
+            const systemReady = document.getElementById('systemReady');
+            
+            // Update building model status
+            const buildingCard = buildingStatus.parentElement;
+            if (systemState.buildingModelLoaded) {
+                buildingStatus.textContent = 'Loaded ✅';
+                buildingCard.className = 'status-card status-success';
+            } else {
+                buildingStatus.textContent = 'Not Loaded';
+                buildingCard.className = 'status-card status-warning';
+            }
+            
+            // Update weather dataset status
+            const weatherCard = weatherStatus.parentElement;
+            if (systemState.weatherDatasetLoaded) {
+                weatherStatus.textContent = 'Loaded ✅';
+                weatherCard.className = 'status-card status-success';
+            } else {
+                weatherStatus.textContent = 'Not Loaded';
+                weatherCard.className = 'status-card status-warning';
+            }
+            
+            // Update training status
+            const trainingCard = trainingStatus.parentElement;
+            if (systemState.trainingCompleted) {
+                trainingStatus.textContent = 'Completed ✅';
+                trainingCard.className = 'status-card status-success';
+            } else {
+                trainingStatus.textContent = 'Not Started';
+                trainingCard.className = 'status-card status-warning';
+            }
+            
+            // Update system ready status
+            const readyCard = systemReady.parentElement;
+            const isReady = systemState.buildingModelLoaded && systemState.weatherDatasetLoaded;
+            if (isReady && systemState.trainingCompleted) {
+                systemReady.textContent = 'Yes ✅';
+                readyCard.className = 'status-card status-success';
+            } else if (isReady) {
+                systemReady.textContent = 'Ready for Training 🎯';
+                readyCard.className = 'status-card status-info';
+            } else {
+                systemReady.textContent = 'No';
+                readyCard.className = 'status-card status-error';
+            }
+            
+            // Update training button
+            const trainBtn = document.getElementById('runTrainingBtn');
+            trainBtn.disabled = !isReady;
+        }
+
+        async function checkModelStatus() {
+            try {
+                const response = await fetch('/api/v2/model/status');
+                const status = await response.json();
+                
+                systemState.buildingModelLoaded = status.building_model_loaded;
+                systemState.weatherDatasetLoaded = status.weather_dataset_loaded;
+                systemState.trainingCompleted = status.training_completed;
+                
+                updateSystemStatus();
+                
+                if (status.building_model_loaded) {
+                    displayBuildingModelInfo(status.building_model);
+                }
+                
+                if (status.weather_dataset_loaded) {
+                    displayWeatherDatasetInfo(status.weather_dataset);
+                }
+                
+                if (status.training_completed) {
+                    displayTrainingResults(status.training_results);
+                }
+                
+            } catch (error) {
+                logMessage(`Error checking model status: ${error.message}`);
+            }
+        }
+
+        async function uploadBuildingModel(file) {
+            if (!file) return;
+            
+            if (!file.name.toLowerCase().endsWith('.idf')) {
+                logMessage('Error: Please select a .idf file');
+                return;
+            }
+            
+            logMessage(`Uploading building model: ${file.name}`);
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            try {
+                const response = await fetch('/api/v2/building-model/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    logMessage(`✅ Building model uploaded successfully: ${result.building_model.building_type}`);
+                    systemState.buildingModelLoaded = true;
+                    updateSystemStatus();
+                    displayBuildingModelInfo(result.building_model);
+                } else {
+                    logMessage(`❌ Upload failed: ${result.error}`);
+                }
+                
+            } catch (error) {
+                logMessage(`❌ Upload error: ${error.message}`);
+            }
+        }
+
+        async function uploadWeatherDataset(file) {
+            if (!file) return;
+            
+            if (!file.name.toLowerCase().endsWith('.epw')) {
+                logMessage('Error: Please select a .epw file');
+                return;
+            }
+            
+            logMessage(`Uploading weather dataset: ${file.name}`);
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            const limitHours = document.getElementById('limitHours').value;
+            if (limitHours) {
+                formData.append('limit_hours', limitHours);
+            }
+            
+            try {
+                const response = await fetch('/api/v2/weather-dataset/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    logMessage(`✅ Weather dataset uploaded: ${result.weather_dataset.location.city}, ${result.weather_dataset.data_points} hours`);
+                    systemState.weatherDatasetLoaded = true;
+                    updateSystemStatus();
+                    displayWeatherDatasetInfo(result.weather_dataset);
+                } else {
+                    logMessage(`❌ Upload failed: ${result.error}`);
+                }
+                
+            } catch (error) {
+                logMessage(`❌ Upload error: ${error.message}`);
+            }
+        }
+
+        function displayBuildingModelInfo(buildingModel) {
+            const infoDiv = document.getElementById('buildingModelInfo');
+            
+            infoDiv.innerHTML = `
+                <div class="info-card">
+                    <h4>Building Type</h4>
+                    <div class="value">${buildingModel.building_type}</div>
+                </div>
+                <div class="info-card">
+                    <h4>Floor Area</h4>
+                    <div class="value">${Math.round(buildingModel.floor_area_sqft).toLocaleString()} sq ft</div>
+                </div>
+                <div class="info-card">
+                    <h4>Thermal Time Constant</h4>
+                    <div class="value">${buildingModel.time_constant_hours.toFixed(1)} hrs</div>
+                </div>
+                <div class="info-card">
+                    <h4>HVAC Systems</h4>
+                    <div class="value">${buildingModel.hvac_systems.equipment_count} units</div>
+                </div>
+            `;
+            
+            infoDiv.style.display = 'grid';
+        }
+
+        function displayWeatherDatasetInfo(weatherDataset) {
+            const infoDiv = document.getElementById('weatherDatasetInfo');
+            const stats = weatherDataset.summary_statistics;
+            
+            infoDiv.innerHTML = `
+                <div class="info-card">
+                    <h4>Location</h4>
+                    <div class="value">${weatherDataset.location.city}</div>
+                </div>
+                <div class="info-card">
+                    <h4>Data Points</h4>
+                    <div class="value">${weatherDataset.data_points.toLocaleString()} hours</div>
+                </div>
+                <div class="info-card">
+                    <h4>Temperature Range</h4>
+                    <div class="value">${stats.temperature_range_F ? `${Math.round(stats.temperature_range_F.min)}°F to ${Math.round(stats.temperature_range_F.max)}°F` : 'N/A'}</div>
+                </div>
+                <div class="info-card">
+                    <h4>Data Quality</h4>
+                    <div class="value">${stats.data_quality ? `${Math.round(stats.data_quality.completeness_pct)}%` : 'N/A'}</div>
+                </div>
+            `;
+            
+            infoDiv.style.display = 'grid';
+        }
+
+        async function runEnhancedTraining() {
+            if (!systemState.buildingModelLoaded || !systemState.weatherDatasetLoaded) {
+                logMessage('❌ Both building model and weather dataset must be loaded first');
+                return;
+            }
+            
+            const trainingDuration = parseInt(document.getElementById('trainingDuration').value) || 168;
+            
+            // Get selected scenarios
+            const scenarios = [];
+            document.querySelectorAll('.scenario-checkbox input[type="checkbox"]:checked').forEach(checkbox => {
+                scenarios.push(checkbox.value);
+            });
+            
+            if (scenarios.length === 0) {
+                logMessage('❌ Please select at least one HVAC scenario');
+                return;
+            }
+            
+            logMessage(`🎯 Starting enhanced training - Duration: ${trainingDuration}h, Scenarios: ${scenarios.join(', ')}`);
+            
+            // Show progress bar
+            const progressBar = document.getElementById('trainingProgress');
+            const progressFill = document.getElementById('trainingProgressFill');
+            progressBar.style.display = 'block';
+            progressFill.style.width = '10%';
+            
+            // Disable training button
+            const trainBtn = document.getElementById('runTrainingBtn');
+            trainBtn.disabled = true;
+            trainBtn.textContent = '🔄 Training in Progress...';
+            
+            try {
+                const response = await fetch('/api/v2/training/run', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        training_duration_hours: trainingDuration,
+                        hvac_scenarios: scenarios
+                    })
+                });
+                
+                progressFill.style.width = '50%';
+                
+                const result = await response.json();
+                
+                progressFill.style.width = '100%';
+                
+                if (result.success) {
+                    logMessage(`✅ Enhanced training completed successfully!`);
+                    logMessage(`   Training samples: ${result.training_results.total_samples}`);
+                    logMessage(`   Accuracy score: ${result.training_results.accuracy_score.toFixed(3)}`);
+                    logMessage(`   Physics compliance: ${(result.training_results.physics_compliance * 100).toFixed(1)}%`);
+                    
+                    systemState.trainingCompleted = true;
+                    updateSystemStatus();
+                    displayTrainingResults(result.training_results);
+                } else {
+                    logMessage(`❌ Training failed: ${result.error}`);
+                }
+                
+            } catch (error) {
+                logMessage(`❌ Training error: ${error.message}`);
+            } finally {
+                // Hide progress bar and re-enable button
+                setTimeout(() => {
+                    progressBar.style.display = 'none';
+                    trainBtn.disabled = false;
+                    trainBtn.textContent = '🚀 Run Enhanced Training';
+                }, 1000);
+            }
+        }
+
+        function displayTrainingResults(results) {
+            const resultsDiv = document.getElementById('trainingResults');
+            
+            resultsDiv.innerHTML = `
+                <h4>🎯 Training Results</h4>
+                <div class="model-info">
+                    <div class="info-card">
+                        <h4>Total Samples</h4>
+                        <div class="value">${results.total_samples.toLocaleString()}</div>
+                    </div>
+                    <div class="info-card">
+                        <h4>Valid Samples</h4>
+                        <div class="value">${results.valid_samples.toLocaleString()}</div>
+                    </div>
+                    <div class="info-card">
+                        <h4>Accuracy Score</h4>
+                        <div class="value">${results.accuracy_score.toFixed(3)}</div>
+                    </div>
+                    <div class="info-card">
+                        <h4>Physics Compliance</h4>
+                        <div class="value">${(results.physics_compliance * 100).toFixed(1)}%</div>
+                    </div>
+                </div>
+            `;
+            
+            resultsDiv.style.display = 'block';
+        }
+    </script>
+</body>
+</html>

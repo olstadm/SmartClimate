@@ -530,8 +530,8 @@ class ThermalModel:
         phi = self._build_feature_vector(t_in, t_out, h_in, h_out, hvac_state, solar)
         dT_dt = np.dot(phi, self.rls.theta)
         
-        # Apply ML correction if available
-        if self.ml_corrector and self.ml_enabled:
+        # Apply ML correction if available (DISABLED in v2.0 for physics accuracy)
+        if self.ml_corrector and self.ml_enabled and False:  # Temporarily disabled
             base_prediction = dT_dt
             correction = self.ml_corrector.predict_correction({
                 'indoor_temp': t_in,

@@ -791,7 +791,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '1.9.4',
+                'addon_version': '2.0.0',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -828,7 +828,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '1.9.4',
+                'version': '2.0.0',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
@@ -1542,6 +1542,261 @@ information about HomeForecast operation.
     def logs_page():
         """Logs viewer page"""
         return render_template('logs.html')
+    
+    @app.route('/v2/building-model-manager')
+    def building_model_manager():
+        """V2.0 Building Model Manager page"""
+        return render_template('building_model_manager.html')
+    
+    # V2.0 Building Model and Weather File Upload Endpoints
+    @app.route('/api/v2/building-model/upload', methods=['POST'])
+    def upload_building_model():
+        """Upload and parse DOE IDF building model file"""
+        try:
+            if 'file' not in request.files:
+                return jsonify({
+                    'success': False,
+                    'error': 'No file provided'
+                }), 400
+                
+            file = request.files['file']
+            if file.filename == '':
+                return jsonify({
+                    'success': False,
+                    'error': 'No file selected'
+                }), 400
+                
+            if not file.filename.lower().endswith('.idf'):
+                return jsonify({
+                    'success': False,
+                    'error': 'File must be a .idf file'
+                }), 400
+                
+            # Save uploaded file temporarily
+            import tempfile
+            import os
+            from ..models.enhanced_training_system import EnhancedTrainingSystem
+            
+            with tempfile.NamedTemporaryFile(mode='w+b', suffix='.idf', delete=False) as tmp_file:
+                file.save(tmp_file.name)
+                tmp_path = tmp_file.name
+                
+            try:
+                # Parse building model
+                training_system = EnhancedTrainingSystem(homeforecast_instance.thermal_model)
+                building_model = training_system.load_building_model(tmp_path)
+                
+                # Store building model in homeforecast instance
+                homeforecast_instance.building_model = building_model
+                
+                logger.info(f"✅ Building model uploaded and parsed: {building_model['building_type']}")
+                
+                return jsonify({
+                    'success': True,
+                    'building_model': {
+                        'building_type': building_model['building_type'],
+                        'floor_area_sqft': building_model['geometry']['floor_area_sqft'],
+                        'time_constant_hours': building_model['rc_parameters']['time_constant_hours'],
+                        'thermal_properties': {
+                            'material_count': building_model['thermal_properties']['material_count'],
+                            'thermal_time_constant_hours': building_model['thermal_properties']['thermal_time_constant_hours']
+                        },
+                        'hvac_systems': building_model['hvac_systems'],
+                        'upload_timestamp': datetime.now().isoformat()
+                    }
+                })
+                
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(tmp_path)
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"❌ Error uploading building model: {e}")
+            return jsonify({
+                'success': False,
+                'error': f'Error parsing building model: {str(e)}'
+            }), 500
+    
+    @app.route('/api/v2/weather-dataset/upload', methods=['POST'])
+    def upload_weather_dataset():
+        """Upload and parse EPW weather dataset file"""
+        try:
+            if 'file' not in request.files:
+                return jsonify({
+                    'success': False,
+                    'error': 'No file provided'
+                }), 400
+                
+            file = request.files['file']
+            if file.filename == '':
+                return jsonify({
+                    'success': False,
+                    'error': 'No file selected'
+                }), 400
+                
+            if not file.filename.lower().endswith('.epw'):
+                return jsonify({
+                    'success': False,
+                    'error': 'File must be a .epw file'
+                }), 400
+                
+            # Get optional parameters
+            limit_hours = request.form.get('limit_hours', type=int)
+            
+            # Save uploaded file temporarily
+            import tempfile
+            import os
+            from ..models.enhanced_training_system import EnhancedTrainingSystem
+            
+            with tempfile.NamedTemporaryFile(mode='w+b', suffix='.epw', delete=False) as tmp_file:
+                file.save(tmp_file.name)
+                tmp_path = tmp_file.name
+                
+            try:
+                # Parse weather dataset
+                training_system = EnhancedTrainingSystem(homeforecast_instance.thermal_model)
+                weather_dataset = training_system.load_weather_dataset(tmp_path, limit_hours)
+                
+                # Store weather dataset in homeforecast instance
+                homeforecast_instance.weather_dataset = weather_dataset
+                
+                logger.info(f"✅ Weather dataset uploaded: {weather_dataset['location']['city']}, {weather_dataset['data_points']} hours")
+                
+                return jsonify({
+                    'success': True,
+                    'weather_dataset': {
+                        'location': weather_dataset['location'],
+                        'data_points': weather_dataset['data_points'],
+                        'summary_statistics': weather_dataset['summary_statistics'],
+                        'upload_timestamp': datetime.now().isoformat()
+                    }
+                })
+                
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(tmp_path)
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"❌ Error uploading weather dataset: {e}")
+            return jsonify({
+                'success': False,
+                'error': f'Error parsing weather dataset: {str(e)}'
+            }), 500
+    
+    @app.route('/api/v2/training/run', methods=['POST'])
+    def run_enhanced_training():
+        """Run enhanced training using uploaded building model and weather data"""
+        try:
+            # Check prerequisites
+            if not hasattr(homeforecast_instance, 'building_model') or not homeforecast_instance.building_model:
+                return jsonify({
+                    'success': False,
+                    'error': 'Building model must be uploaded first'
+                }), 400
+                
+            if not hasattr(homeforecast_instance, 'weather_dataset') or not homeforecast_instance.weather_dataset:
+                return jsonify({
+                    'success': False,
+                    'error': 'Weather dataset must be uploaded first'  
+                }), 400
+                
+            # Get training parameters
+            data = request.get_json() or {}
+            training_duration_hours = data.get('training_duration_hours', 168)  # 1 week default
+            hvac_scenarios = data.get('hvac_scenarios', ['heating', 'cooling', 'off', 'mixed'])
+            comfort_min = data.get('comfort_min', 68.0)
+            comfort_max = data.get('comfort_max', 76.0)
+            
+            # Run enhanced training
+            from ..models.enhanced_training_system import EnhancedTrainingSystem
+            training_system = EnhancedTrainingSystem(homeforecast_instance.thermal_model)
+            training_system.building_model = homeforecast_instance.building_model
+            training_system.weather_dataset = homeforecast_instance.weather_dataset
+            
+            logger.info(f"🎯 Starting enhanced training - Duration: {training_duration_hours}h, Scenarios: {hvac_scenarios}")
+            
+            training_results = training_system.run_enhanced_training(
+                training_duration_hours=training_duration_hours,
+                hvac_scenarios=hvac_scenarios,
+                comfort_min=comfort_min,
+                comfort_max=comfort_max
+            )
+            
+            # Store training results
+            homeforecast_instance.training_results = training_results
+            
+            logger.info(f"✅ Enhanced training completed - Accuracy: {training_results.get('accuracy_score', 0):.3f}")
+            
+            return jsonify({
+                'success': True,
+                'training_results': training_results,
+                'training_timestamp': datetime.now().isoformat()
+            })
+            
+        except Exception as e:
+            logger.error(f"❌ Error running enhanced training: {e}")
+            return jsonify({
+                'success': False,
+                'error': f'Error running enhanced training: {str(e)}'
+            }), 500
+    
+    @app.route('/api/v2/model/status')
+    def get_v2_model_status():
+        """Get comprehensive v2.0 model status including building model and training state"""
+        try:
+            building_model_loaded = hasattr(homeforecast_instance, 'building_model') and homeforecast_instance.building_model
+            weather_dataset_loaded = hasattr(homeforecast_instance, 'weather_dataset') and homeforecast_instance.weather_dataset
+            training_completed = hasattr(homeforecast_instance, 'training_results') and homeforecast_instance.training_results
+            
+            status = {
+                'version': '2.0.0',
+                'building_model_loaded': building_model_loaded,
+                'weather_dataset_loaded': weather_dataset_loaded,
+                'training_completed': training_completed,
+                'system_ready': building_model_loaded and weather_dataset_loaded and training_completed
+            }
+            
+            if building_model_loaded:
+                bm = homeforecast_instance.building_model
+                status['building_model'] = {
+                    'building_type': bm['building_type'],
+                    'floor_area_sqft': bm['geometry']['floor_area_sqft'],
+                    'time_constant_hours': bm['rc_parameters']['time_constant_hours']
+                }
+                
+            if weather_dataset_loaded:
+                wd = homeforecast_instance.weather_dataset
+                status['weather_dataset'] = {
+                    'location': wd['location']['city'],
+                    'data_points': wd['data_points']
+                }
+                
+            if training_completed:
+                tr = homeforecast_instance.training_results
+                status['training_results'] = {
+                    'accuracy_score': tr.get('accuracy_score', 0),
+                    'physics_compliance': tr.get('physics_compliance', 0),
+                    'total_samples': tr.get('total_samples', 0)
+                }
+                
+            return jsonify(status)
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting v2.0 model status: {e}")
+            return jsonify({
+                'version': '2.0.0',
+                'error': f'Error getting model status: {str(e)}',
+                'building_model_loaded': False,
+                'weather_dataset_loaded': False,
+                'training_completed': False,
+                'system_ready': False
+            }), 500
         
     return app
 

@@ -22,6 +22,7 @@
                     </svg>
                     Update Now
                 </button>
+
             </div>
         </div>
         
@@ -107,6 +108,7 @@
         <div class="tabs">
             <button class="tab active" data-tab="forecast">Forecast</button>
             <button class="tab" data-tab="analysis">Analysis</button>
+            <button class="tab" data-tab="v2training">V2.0 Training</button>
             <button class="tab" data-tab="settings">Settings</button>
             <button class="tab" data-tab="debug">Debug</button>
         </div>
@@ -233,6 +235,205 @@
                             <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3z"/>
                         </svg>
                         Train ML Model
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- V2.0 Training Tab -->
+        <div id="v2trainingTab" class="tab-content">
+            <!-- RC Model Accuracy Overview -->
+            <div class="grid">
+                <div class="card">
+                    <h2>
+                        <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        RC Model Accuracy
+                    </h2>
+                    <div class="metric">
+                        <span class="metric-label">Current Accuracy:</span>
+                        <span class="metric-value large" id="rcModelAccuracy">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Physics Compliance:</span>
+                        <span class="metric-value" id="physicsCompliance">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Training Status:</span>
+                        <span class="status" id="v2TrainingStatus">Ready</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Building Model:</span>
+                        <span class="metric-value" id="loadedBuildingModel">None</span>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>
+                        <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3z"/>
+                        </svg>
+                        Comfort Band Training
+                    </h2>
+                    <div class="metric">
+                        <label for="comfortMin">Minimum Comfort (°F):</label>
+                        <input type="number" id="comfortMin" value="68" min="60" max="80" step="0.5" class="comfort-input">
+                    </div>
+                    <div class="metric">
+                        <label for="comfortMax">Maximum Comfort (°F):</label>
+                        <input type="number" id="comfortMax" value="76" min="65" max="85" step="0.5" class="comfort-input">
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Current Band:</span>
+                        <span class="metric-value" id="currentComfortBand">68.0°F - 76.0°F</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- File Upload Section -->
+            <div class="grid">
+                <div class="card">
+                    <h2>
+                        <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"/>
+                        </svg>
+                        DOE Building Model
+                    </h2>
+                    <div class="upload-zone" id="idfUploadZone" onclick="document.getElementById('idfFileInput').click()">
+                        <div class="upload-content">
+                            <svg class="upload-icon" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z"/>
+                            </svg>
+                            <div class="upload-text">
+                                <strong>Drop IDF file or click to browse</strong>
+                                <p>DOE Residential Prototype Building Models</p>
+                            </div>
+                        </div>
+                        <input type="file" id="idfFileInput" accept=".idf" style="display: none;">
+                    </div>
+                    <div id="idfModelInfo" class="model-info" style="display: none;"></div>
+                </div>
+
+                <div class="card">
+                    <h2>
+                        <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z"/>
+                        </svg>
+                        EPW Weather Dataset
+                    </h2>
+                    <div class="upload-zone" id="epwUploadZone" onclick="document.getElementById('epwFileInput').click()">
+                        <div class="upload-content">
+                            <svg class="upload-icon" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z"/>
+                            </svg>
+                            <div class="upload-text">
+                                <strong>Drop EPW file or click to browse</strong>
+                                <p>EnergyPlus Weather Files</p>
+                            </div>
+                        </div>
+                        <input type="file" id="epwFileInput" accept=".epw" style="display: none;">
+                    </div>
+                    <div class="metric" style="margin-top: 10px;">
+                        <label for="epwLimitHours">Limit Hours (optional):</label>
+                        <input type="number" id="epwLimitHours" placeholder="e.g., 168 for 1 week" min="1" max="8760" class="comfort-input">
+                    </div>
+                    <div id="epwWeatherInfo" class="model-info" style="display: none;"></div>
+                </div>
+            </div>
+
+            <!-- Training Section -->
+            <div class="card">
+                <h2>
+                    <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
+                    </svg>
+                    Enhanced RC Model Training
+                </h2>
+                
+                <div class="training-controls">
+                    <div class="grid" style="margin-bottom: 20px;">
+                        <div class="metric">
+                            <label for="trainingDurationV2">Training Duration (hours):</label>
+                            <input type="number" id="trainingDurationV2" value="168" min="24" max="8760" class="comfort-input">
+                        </div>
+                        <div class="metric">
+                            <label>HVAC Scenarios:</label>
+                            <div class="scenario-checkboxes">
+                                <label><input type="checkbox" value="heating" checked> Heating</label>
+                                <label><input type="checkbox" value="cooling" checked> Cooling</label>
+                                <label><input type="checkbox" value="off" checked> HVAC Off</label>
+                                <label><input type="checkbox" value="mixed" checked> Mixed Mode</label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button id="startV2TrainingBtn" class="btn btn-primary" onclick="startV2Training()" disabled>
+                        <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M8 5v10l7-5-7-5z"/>
+                        </svg>
+                        Start Enhanced Training
+                    </button>
+                </div>
+
+                <!-- Training Progress -->
+                <div id="trainingProgressSection" class="training-progress" style="display: none;">
+                    <div class="progress-header">
+                        <h3>Training Progress</h3>
+                        <span id="trainingProgressText">Initializing...</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="trainingProgressBar" style="width: 0%;"></div>
+                        </div>
+                        <div class="progress-percentage" id="trainingProgressPercent">0%</div>
+                    </div>
+                    <div class="progress-stats">
+                        <div class="stat-item">
+                            <span class="stat-label">Processing:</span>
+                            <span class="stat-value" id="currentProcessingFile">-</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Samples Generated:</span>
+                            <span class="stat-value" id="samplesGenerated">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Physics Violations:</span>
+                            <span class="stat-value" id="physicsViolations">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Estimated Completion:</span>
+                            <span class="stat-value" id="estimatedCompletion">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Training Results -->
+                <div id="trainingResultsSection" class="training-results" style="display: none;">
+                    <h3>Training Results</h3>
+                    <div class="grid">
+                        <div class="metric">
+                            <span class="metric-label">Final Accuracy:</span>
+                            <span class="metric-value large" id="finalAccuracy">-</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Physics Compliance:</span>
+                            <span class="metric-value" id="finalPhysicsCompliance">-</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Training Samples:</span>
+                            <span class="metric-value" id="finalTrainingSamples">-</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Model Improvement:</span>
+                            <span class="metric-value" id="modelImprovement">-</span>
+                        </div>
+                    </div>
+                    <button id="applyModelBtn" class="btn btn-success" onclick="applyEnhancedModel()" style="margin-top: 15px;">
+                        <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        Apply Enhanced Model to RC System
                     </button>
                 </div>
             </div>
