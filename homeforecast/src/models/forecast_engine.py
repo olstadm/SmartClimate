@@ -1084,6 +1084,8 @@ class ForecastEngine:
                             'solar_irradiance': 0.0,
                             'data_type': 'interpolated'
                         })
+        
+        return filled_series
     
     async def _get_historical_sensor_data(self, target_timestamps: List[datetime]) -> Dict:
         """

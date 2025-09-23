@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.18] - 2025-09-23
+
+### Critical Bug Fix
+- **Fixed Forecast Engine Crash**: Resolved `TypeError: object of type 'NoneType' has no len()` in forecast generation
+- **Missing Return Statement**: Added missing `return filled_series` in `_fill_time_gaps()` method
+- **Forecast Generation Recovery**: System now properly generates forecasts without crashing during time gap filling
+
+### Technical Details
+- The `_fill_time_gaps()` method was missing a return statement, causing it to return `None` 
+- This caused the forecast engine to crash when trying to get the length of the time series
+- Added proper return statement to ensure filled time series is returned correctly
+
 ## [1.8.17] - 2025-09-23
 
 ### Historical Sensor Data Integration & Visual Timeline Separation
