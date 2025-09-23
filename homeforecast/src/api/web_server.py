@@ -661,6 +661,66 @@ def create_app(homeforecast_instance):
                         forecast['chart_data'] = chart_data
                         logger.info(f"Added chart data with {len(chart_data['timestamps'])} points and {len(chart_data['historical_weather'])} historical points")
                 
+                # Add new separated data structure for enhanced chart
+                if 'historical_data' in forecast_data and 'forecast_data' in forecast_data:
+                    # Use the new enhanced structure
+                    logger.info(f"✅ Enhanced chart data structure available")
+                    logger.info(f"Historical data keys: {list(forecast_data['historical_data'].keys()) if forecast_data['historical_data'] else 'None'}")
+                    logger.info(f"Forecast data keys: {list(forecast_data['forecast_data'].keys()) if forecast_data['forecast_data'] else 'None'}")
+                elif 'controlled_trajectory' in forecast_data and 'idle_trajectory' in forecast_data:
+                    # Create enhanced structure from legacy data
+                    logger.info("🔄 Creating enhanced chart structure from legacy data")
+                    
+                    # Determine current time index for separation
+                    current_time_index = forecast_data.get('current_time_index', 0)
+                    if current_time_index is None:
+                        current_time_index = 0
+                    
+                    logger.info(f"Using current_time_index: {current_time_index}")
+                    
+                    # Create historical data (if any)
+                    historical_data = {}
+                    if current_time_index > 0:
+                        timestamps = forecast_data.get('timestamps', [])
+                        controlled_traj = forecast_data.get('controlled_trajectory', [])
+                        
+                        historical_data = {
+                            'timestamps': timestamps[:current_time_index],
+                            'actual_outdoor_temp': [step.get('outdoor_temp', 70) for step in forecast_data.get('outdoor_series', [])[:current_time_index]],
+                            'actual_indoor_temp': [step.get('indoor_temp', 70) for step in controlled_traj[:current_time_index]],
+                            'actual_hvac_mode': [step.get('hvac_state', 'off') for step in controlled_traj[:current_time_index]]
+                        }
+                        logger.info(f"Created historical data with {len(historical_data['timestamps'])} points")
+                    
+                    # Create forecast data
+                    timestamps = forecast_data.get('timestamps', [])
+                    controlled_traj = forecast_data.get('controlled_trajectory', [])
+                    idle_traj = forecast_data.get('idle_trajectory', [])
+                    
+                    forecast_data_section = {
+                        'timestamps': timestamps[current_time_index:],
+                        'forecasted_outdoor_temp': forecast_data.get('outdoor_forecast', [])[current_time_index:],
+                        'projected_indoor_with_hvac': [step.get('indoor_temp', 70) for step in controlled_traj[current_time_index:]],
+                        'projected_indoor_no_hvac': [step.get('indoor_temp', 70) for step in idle_traj[current_time_index:]],
+                        'projected_hvac_mode': [step.get('hvac_state', 'off') for step in controlled_traj[current_time_index:]]
+                    }
+                    logger.info(f"Created forecast data with {len(forecast_data_section['timestamps'])} points")
+                    
+                    # Add to forecast response
+                    forecast_data['historical_data'] = historical_data
+                    forecast_data['forecast_data'] = forecast_data_section
+                    
+                    # Add timeline separator
+                    forecast_data['timeline_separator'] = {
+                        'historical_end_index': current_time_index - 1 if current_time_index > 0 else 0,
+                        'forecast_start_index': current_time_index,
+                        'separator_timestamp': timestamps[current_time_index] if current_time_index < len(timestamps) else None,
+                        'separator_label': 'Current Time - Forecast Begins'
+                    }
+                    logger.info(f"Added timeline separator at index {current_time_index}")
+                    
+                    logger.info("✅ Enhanced chart structure created from legacy data")
+                
                 # Convert all data to JSON-serializable types
                 forecast = convert_numpy_types(forecast)
                 logger.info(f"✅ API: Returning forecast data")

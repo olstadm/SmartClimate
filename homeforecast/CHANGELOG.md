@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.22] - 2025-09-23
+
+### Enhanced Chart Data Structure API Support
+- **Fixed Missing Chart Data**: Resolved "No current trajectory data available for energy chart" error
+- **Enhanced Data Structure Creation**: Added automatic conversion from legacy to new chart format in API
+- **Timeline Separator API**: Added proper timeline_separator metadata for "NOW" line positioning  
+- **Historical Data Integration**: Creates historical_data and forecast_data sections from legacy trajectory data
+- **Improved Chart Population**: Ensures all chart sections (historical/forecast) receive proper data
+
+### Technical Improvements
+- **API Data Conversion**: Automatically creates enhanced chart structure when legacy format detected
+- **Current Time Index Usage**: Properly separates historical from forecast data using current_time_index
+- **Enhanced Logging**: Added detailed logging for chart data structure creation and validation
+- **Data Structure Validation**: Added checks for enhanced vs legacy data format compatibility
+- **Timeline Metadata**: Includes separator positioning information for visual "NOW" line placement
+
+### Chart Data Structure
+- **Historical Section**: actual_outdoor_temp, actual_indoor_temp, actual_hvac_mode from trajectory data
+- **Forecast Section**: forecasted_outdoor_temp, projected_indoor_with_hvac, projected_indoor_no_hvac
+- **Timeline Separator**: historical_end_index, forecast_start_index, separator_timestamp for "NOW" line
+
 ## [1.8.21] - 2025-09-23
 
 ### Dashboard Error Fixes & Data Structure Compatibility
