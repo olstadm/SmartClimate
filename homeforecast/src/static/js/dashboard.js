@@ -2047,8 +2047,8 @@ class HomeForecastDashboard {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
 
-            // Simulate progress updates during training
-            this.simulateTrainingProgress(duration, scenarios);
+            // Start real progress polling instead of simulation
+            this.startTrainingProgressPolling();
 
             const result = await response.json();
             console.log('Training result:', result);
@@ -2071,6 +2071,13 @@ class HomeForecastDashboard {
 
         } catch (error) {
             console.error('Training error details:', error);
+            
+            // Clear progress polling on error
+            if (this.progressPollingInterval) {
+                clearInterval(this.progressPollingInterval);
+                this.progressPollingInterval = null;
+            }
+            
             if (error.name === 'TypeError' && error.message.includes('fetch')) {
                 this.showNotification(`Connection error: Unable to reach server. Please check if the HomeForecast service is running.`, 'error');
             } else {
@@ -2080,7 +2087,49 @@ class HomeForecastDashboard {
         } finally {
             trainBtn.disabled = false;
             trainBtn.textContent = 'Start Enhanced Training';
+            
+            // Ensure polling is cleaned up
+            if (this.progressPollingInterval) {
+                clearInterval(this.progressPollingInterval);
+                this.progressPollingInterval = null;
+            }
         }
+    }
+
+    startTrainingProgressPolling() {
+        // Clear any existing interval
+        if (this.progressPollingInterval) {
+            clearInterval(this.progressPollingInterval);
+        }
+        
+        // Poll for real training progress
+        this.progressPollingInterval = setInterval(async () => {
+            try {
+                const response = await fetch('/api/v2/training/status');
+                if (response.ok) {
+                    const status = await response.json();
+                    if (status.is_training) {
+                        this.updateTrainingProgress(
+                            status.progress || 0,
+                            status.status_message || 'Training in progress...',
+                            {
+                                samplesGenerated: status.samples_processed || 0,
+                                physicsViolations: status.physics_violations || 0,
+                                estimatedCompletion: status.estimated_completion || ''
+                            }
+                        );
+                        
+                        // If training is complete, clear the interval
+                        if (status.progress >= 100) {
+                            clearInterval(this.progressPollingInterval);
+                            this.progressPollingInterval = null;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.log('Progress polling error:', error);
+            }
+        }, 1000); // Poll every second
     }
 
     simulateTrainingProgress(duration, scenarios) {

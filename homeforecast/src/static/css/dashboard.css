@@ -634,19 +634,19 @@ body {
 
 /* V2.0 Training Styles */
 .upload-zone {
-    border: 2px dashed #ddd;
+    border: 2px dashed var(--border-color);
     border-radius: var(--border-radius);
     padding: 30px;
     text-align: center;
     cursor: pointer;
     transition: var(--transition);
-    background: #fafafa;
+    background: #595959;
     margin: 15px 0;
 }
 
 .upload-zone:hover {
     border-color: var(--primary-color);
-    background: #f0f8ff;
+    background: #6a6a6a;
 }
 
 .upload-zone.dragover {
@@ -724,7 +724,7 @@ body {
 }
 
 .training-progress {
-    background: #f8f9fa;
+    background: #595959;
     border-radius: var(--border-radius);
     padding: 20px;
     margin-top: 20px;
@@ -851,7 +851,7 @@ body {
 .model-info {
     margin-top: 15px;
     padding: 15px;
-    background: #f8f9fa;
+    background: #595959;
     border-radius: var(--border-radius);
     border-left: 3px solid var(--primary-color);
 }

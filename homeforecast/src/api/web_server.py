@@ -1862,14 +1862,38 @@ information about HomeForecast operation.
             training_system.building_model = homeforecast_instance.building_model
             training_system.weather_dataset = homeforecast_instance.weather_dataset
             
+            # Set initial training status
+            training_status['is_training'] = True
+            training_status['progress'] = 0
+            training_status['status_message'] = 'Initializing enhanced training...'
+            training_status['samples_processed'] = 0
+            training_status['physics_violations'] = 0
+            
+            def progress_callback(percentage, message):
+                """Update training status for UI polling"""
+                training_status['progress'] = percentage
+                training_status['status_message'] = message
+                # Extract sample count from message if present
+                if 'sample' in message.lower():
+                    import re
+                    match = re.search(r'(\d+)/(\d+)', message)
+                    if match:
+                        training_status['samples_processed'] = int(match.group(1))
+            
             logger.info(f"🎯 Starting enhanced training - Duration: {training_duration_hours}h, Scenarios: {hvac_scenarios}")
             
             training_results = training_system.run_enhanced_training(
                 training_duration_hours=training_duration_hours,
                 hvac_scenarios=hvac_scenarios,
                 comfort_min=comfort_min,
-                comfort_max=comfort_max
+                comfort_max=comfort_max,
+                progress_callback=progress_callback
             )
+            
+            # Complete training status
+            training_status['is_training'] = False
+            training_status['progress'] = 100
+            training_status['status_message'] = 'Training completed successfully!'
             
             # Store training results
             homeforecast_instance.training_results = training_results
@@ -1888,6 +1912,21 @@ information about HomeForecast operation.
                 'success': False,
                 'error': f'Error running enhanced training: {str(e)}'
             }), 500
+    
+    # Global training status variables
+    training_status = {
+        'is_training': False,
+        'progress': 0,
+        'status_message': '',
+        'samples_processed': 0,
+        'physics_violations': 0,
+        'estimated_completion': ''
+    }
+    
+    @app.route('/api/v2/training/status', methods=['GET'])
+    def get_training_status():
+        """Get current training progress status"""
+        return jsonify(training_status)
     
     @app.route('/api/v2/model/status')
     def get_v2_model_status():
