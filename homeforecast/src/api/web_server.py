@@ -1599,7 +1599,7 @@ information about HomeForecast operation.
         return jsonify({
             'success': True,
             'message': 'V2.0 API is working',
-            'version': '2.0.8',
+            'version': '2.0.9',
             'enhanced_training_available': HAS_ENHANCED_TRAINING,
             'simple_training_available': globals().get('HAS_SIMPLE_TRAINING', False),
             'training_available': training_available,

@@ -127,6 +127,15 @@ class EnhancedTrainingSystem:
         Returns:
             Dict containing training results and model parameters
         """
+        import time
+        training_start_time = time.time()
+        
+        logger.info("🏠 HomeForecast Enhanced Training System v2.0.8")
+        logger.info(f"📋 Building: {self.building_model.get('building_type', 'Unknown') if self.building_model else 'No model'}")
+        logger.info(f"🌤️  Weather: {self.weather_dataset.get('location', {}).get('city', 'Unknown') if self.weather_dataset else 'No dataset'}")
+        logger.info(f"⏱️  Training Duration: {training_duration_hours} hours")
+        logger.info("=" * 60)
+        
         if not self.building_model:
             raise ValueError("Building model must be loaded first (use load_building_model)")
             
@@ -144,12 +153,17 @@ class EnhancedTrainingSystem:
         training_data = []
         total_scenarios = len(hvac_scenarios)
         
-        # Generate training scenarios with progress reporting
+        # Stage 1: Generate training scenarios with progress reporting
+        logger.info("📊 STAGE 1: Generating HVAC scenario data...")
+        stage_start_time = time.time()
+        
         for i, scenario in enumerate(hvac_scenarios):
+            elapsed_minutes = (time.time() - training_start_time) / 60
             if progress_callback:
                 progress = (i / total_scenarios) * 80  # Use 80% for data generation
-                progress_callback(progress, f"Generating {scenario} scenario data...")
+                progress_callback(progress, f"Generating {scenario} scenario data... ({elapsed_minutes:.1f}m)")
                 
+            logger.info(f"   🔄 Scenario {i+1}/{total_scenarios}: {scenario.upper()} mode")
             scenario_data = self._simulate_hvac_scenario(
                 scenario, 
                 training_duration_hours // len(hvac_scenarios),
@@ -157,16 +171,27 @@ class EnhancedTrainingSystem:
                 comfort_max
             )
             training_data.extend(scenario_data)
+            logger.info(f"   ✅ Generated {len(scenario_data)} data points for {scenario} scenario")
             
-        if progress_callback:
-            progress_callback(80, "Training thermal model with physics validation...")
-            
-        # Train thermal model with enhanced data
-        self.training_results = self._train_with_physics_validation(training_data, progress_callback)
+        stage_elapsed = (time.time() - stage_start_time) / 60
+        logger.info(f"✅ STAGE 1 Complete: Generated {len(training_data)} total training samples in {stage_elapsed:.1f}m")
         
-        logger.info(f"✅ Enhanced training complete")
+        if progress_callback:
+            elapsed_minutes = (time.time() - training_start_time) / 60
+            progress_callback(80, f"Training thermal model with physics validation... ({elapsed_minutes:.1f}m)")
+            
+        # Stage 2: Train thermal model with enhanced data
+        logger.info("🧠 STAGE 2: Physics validation and thermal model training...")
+        stage2_start_time = time.time()
+        self.training_results = self._train_with_physics_validation(training_data, progress_callback, training_start_time)
+        
+        total_elapsed = (time.time() - training_start_time) / 60
+        logger.info("=" * 60)
+        logger.info(f"✅ Enhanced Training COMPLETE - Total time: {total_elapsed:.1f} minutes")
         logger.info(f"   Training samples: {len(training_data)}")
-        logger.info(f"   Model accuracy: {self.training_results.get('accuracy_score', 0):.3f}")
+        logger.info(f"   Model accuracy: {self.training_results.get('accuracy_score', 0):.1%}")
+        logger.info(f"   Physics compliance: {self.training_results.get('physics_compliance', 0):.1%}")
+        logger.info("=" * 60)
         
         return self.training_results
     
@@ -325,7 +350,9 @@ class EnhancedTrainingSystem:
         
         return total_change
     
-    def _train_with_physics_validation(self, training_data: List[Dict], progress_callback: Optional[callable] = None) -> Dict:
+    def _train_with_physics_validation(self, training_data: List[Dict], 
+                                     progress_callback: Optional[callable] = None,
+                                     training_start_time: float = None) -> Dict:
         """
         Train thermal model with physics validation
         
@@ -335,6 +362,10 @@ class EnhancedTrainingSystem:
         Returns:
             Dict containing training results and validation metrics
         """
+        import time
+        if training_start_time is None:
+            training_start_time = time.time()
+            
         logger.info(f"🧠 Training thermal model with physics validation")
         logger.info(f"   Training samples: {len(training_data)}")
         
@@ -346,7 +377,13 @@ class EnhancedTrainingSystem:
         for i, data_point in enumerate(training_data):
             if progress_callback and i % 100 == 0:  # Update every 100 samples
                 progress = 80 + (i / total_points) * 20  # Use remaining 20%
-                progress_callback(progress, f"Validating sample {i+1}/{total_points}...")
+                elapsed_minutes = (time.time() - training_start_time) / 60
+                progress_callback(progress, f"Validating sample {i+1}/{total_points}... ({elapsed_minutes:.1f}m)")
+                
+                # Log validation progress every 1000 samples
+                if i % 1000 == 0 and i > 0:
+                    logger.info(f"   📊 Validated {i}/{total_points} samples ({i/total_points*100:.1f}%) - Valid: {valid_samples}, Violations: {physics_violations}")
+                
             # Validate physics constraints
             temp_change = data_point['temp_change_per_hour']
             indoor_temp = data_point['indoor_temp_prev']
@@ -366,6 +403,18 @@ class EnhancedTrainingSystem:
         # Calculate training metrics
         accuracy_score = valid_samples / len(training_data) if training_data else 0.0
         physics_compliance = (len(training_data) - physics_violations) / len(training_data) if training_data else 1.0
+        
+        # Final progress update with completion time
+        if progress_callback:
+            elapsed_minutes = (time.time() - training_start_time) / 60
+            progress_callback(100, f"Training completed! ({elapsed_minutes:.1f}m total)")
+            
+        # Log final validation results
+        logger.info(f"✅ STAGE 2 Complete: Physics validation finished")
+        logger.info(f"   Final validation results: {valid_samples}/{len(training_data)} samples valid")
+        logger.info(f"   Physics violations: {physics_violations}")
+        logger.info(f"   Accuracy: {accuracy_score:.1%}")
+        logger.info(f"   Physics compliance: {physics_compliance:.1%}")
         
         results = {
             'total_samples': len(training_data),
