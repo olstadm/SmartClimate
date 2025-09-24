@@ -883,7 +883,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '2.2.0',
+                'addon_version': '2.2.3',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -920,7 +920,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '2.2.0',
+                'version': '2.2.3',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
@@ -1401,6 +1401,70 @@ def create_app(homeforecast_instance):
             logger.error(f"Error resetting model: {e}")
             return jsonify({'error': str(e)}), 500
     
+    @app.route('/api/model/apply-enhanced-training', methods=['POST'])
+    def apply_enhanced_training():
+        """Apply enhanced training results to the thermal model"""
+        try:
+            logger.info("🌐 API: Processing /api/model/apply-enhanced-training request")
+            
+            # Check if we have training results available
+            if not hasattr(app.homeforecast, 'training_results') or not app.homeforecast.training_results:
+                logger.warning("No enhanced training results available to apply")
+                return jsonify({
+                    'success': False, 
+                    'error': 'No enhanced training results available. Please run enhanced training first.'
+                }), 400
+            
+            # Check training quality
+            accuracy = app.homeforecast.training_results.get('accuracy_score', 0)
+            if accuracy < 0.85:
+                logger.warning(f"Enhanced training accuracy too low: {accuracy:.3f}")
+                return jsonify({
+                    'success': False,
+                    'error': f'Training accuracy too low ({accuracy:.1%}). Minimum 85% required.'
+                }), 400
+            
+            # Run async function in sync context
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                # Apply the enhanced training results
+                loop.run_until_complete(
+                    app.homeforecast.thermal_model.apply_enhanced_training_results(
+                        app.homeforecast.training_results
+                    )
+                )
+                
+                # Mark as applied to prevent double application
+                app.homeforecast.enhanced_training_applied = True
+                
+                # Validate model behavior after application
+                default_conditions = {'indoor_temp': 72.0, 'outdoor_temp': 70.0, 'indoor_humidity': 50.0}
+                validation_results = loop.run_until_complete(
+                    app.homeforecast.thermal_model.validate_model_behavior(default_conditions)
+                )
+                
+                logger.info(f"✅ API: Enhanced training applied successfully (accuracy: {accuracy:.1%})")
+                
+                return jsonify({
+                    'success': True,
+                    'message': f'Enhanced training results applied successfully',
+                    'details': {
+                        'accuracy': accuracy,
+                        'physics_compliance': app.homeforecast.training_results.get('physics_compliance', 0),
+                        'validation_passed': validation_results.get('overall_valid', False),
+                        'scenarios_passed': f"{validation_results.get('scenarios_passed', 0)}/{validation_results.get('scenarios_tested', 0)}"
+                    }
+                })
+                
+            finally:
+                loop.close()
+                
+        except Exception as e:
+            logger.error(f"Error applying enhanced training: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+    
     @app.route('/api/ml/training-info')
     def get_ml_training_info():
         """Get ML training information for confirmation dialog"""
@@ -1670,7 +1734,7 @@ information about HomeForecast operation.
         return jsonify({
             'success': True,
             'message': 'V2.0 API is working',
-            'version': '2.2.0',
+            'version': '2.2.3',
             'enhanced_training_available': HAS_ENHANCED_TRAINING,
             'simple_training_available': globals().get('HAS_SIMPLE_TRAINING', False),
             'training_available': training_available,
@@ -2009,7 +2073,7 @@ information about HomeForecast operation.
             training_completed = hasattr(homeforecast_instance, 'training_results') and homeforecast_instance.training_results
             
             status = {
-                'version': '2.2.0',
+                'version': '2.2.3',
                 'building_model_loaded': building_model_loaded,
                 'weather_dataset_loaded': weather_dataset_loaded,
                 'training_completed': training_completed,
@@ -2044,7 +2108,7 @@ information about HomeForecast operation.
         except Exception as e:
             logger.error(f"❌ Error getting v2.0 model status: {e}")
             return jsonify({
-                'version': '2.2.0',
+                'version': '2.2.3',
                 'error': f'Error getting model status: {str(e)}',
                 'building_model_loaded': False,
                 'weather_dataset_loaded': False,

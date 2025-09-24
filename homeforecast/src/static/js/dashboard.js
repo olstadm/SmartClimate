@@ -2224,14 +2224,46 @@ class HomeForecastDashboard {
         try {
             this.showNotification('Applying enhanced model to RC system...', 'info');
             
-            // In a real implementation, this would update the thermal model parameters
-            // For now, we'll simulate the application
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // Call the API endpoint to apply enhanced training
+            const response = await fetch('/api/model/apply-enhanced-training', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
             
-            this.showNotification('Enhanced model successfully applied to RC system!', 'success');
-            this.updateV2Status();
+            const result = await response.json();
+            
+            if (result.success) {
+                const details = result.details || {};
+                let message = `Enhanced model successfully applied to RC system!`;
+                
+                if (details.accuracy) {
+                    message += `\n✅ Training Accuracy: ${(details.accuracy * 100).toFixed(1)}%`;
+                }
+                
+                if (details.validation_passed) {
+                    message += `\n🧪 Validation: ${details.scenarios_passed} scenarios passed`;
+                } else if (details.scenarios_passed) {
+                    message += `\n⚠️ Validation: ${details.scenarios_passed} scenarios (some issues detected)`;
+                }
+                
+                this.showNotification(message, 'success');
+                
+                // Update the UI to reflect the applied model
+                this.updateV2Status();
+                
+                // Refresh model parameters to show the updated values
+                setTimeout(() => {
+                    this.loadModelParameters();
+                }, 1000);
+                
+            } else {
+                this.showNotification(`Error applying model: ${result.error}`, 'error');
+            }
             
         } catch (error) {
+            console.error('Error applying enhanced model:', error);
             this.showNotification(`Error applying model: ${error.message}`, 'error');
         }
     }
