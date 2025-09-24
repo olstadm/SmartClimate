@@ -5,6 +5,30 @@ All notable changes to HomeForecast will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.2] - 2025-09-23
+
+### Enhanced Training & Model Validation System
+- **Realistic HVAC Parameters**: Updated default heating/cooling rates to 2.5°F/hr and -3.0°F/hr (from overly aggressive 3.6/-4.5)
+- **Physics-Compliant Initialization**: Set baseline drift to zero to prevent non-physical spontaneous temperature changes
+- **Enhanced Training Integration**: Fixed theta parameter format to properly integrate DOE training results with RC model
+- **Model Behavior Validation**: Added comprehensive 7-scenario validation system testing heating, cooling, and natural thermal responses
+
+### Training System Improvements
+- **RC Model Integration**: Enhanced training now successfully applies building-specific parameters to runtime RC algorithm
+- **Parameter Array Format**: Fixed theta parameter structure to provide complete 6-parameter array for thermal model
+- **Building Characteristics**: Integrated thermal mass, insulation levels, and HVAC sizing from DOE models
+- **Success Validation**: Added automatic behavior testing after enhanced training application
+
+### Trajectory Separation Enhancement
+- **Clear Mode Identification**: Enhanced logging to distinguish NO-CONTROL vs HVAC-CONTROLLED predictions
+- **Mode-Specific Processing**: Improved separation of idle, controlled, and current-state trajectory generation
+- **Physics Isolation**: Ensured natural thermal predictions are completely isolated from HVAC-trained parameters
+
+### Logging & Diagnostics Optimization
+- **Reduced Verbosity**: Condensed repetitive parameter logging while maintaining critical system diagnostics
+- **Focused Debugging**: Physics corrections now logged only for significant violations or early learning phases
+- **Enhanced Training Feedback**: Clear success/failure reporting when DOE training integrates with RC model
+
 ## [2.2.1] - 2025-09-23
 
 ### Critical Hotfixes
