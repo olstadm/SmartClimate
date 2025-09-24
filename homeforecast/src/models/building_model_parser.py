@@ -299,7 +299,8 @@ class IDFBuildingParser:
             'thermal_properties': {
                 'thermal_time_constant_hours': 8.0,
                 'total_thermal_mass_J_per_K': 1e6,
-                'average_r_value_m2K_per_W': 2.0
+                'average_r_value_m2K_per_W': 2.0,
+                'material_count': 5  # Default material count
             },
             'hvac_systems': {
                 'has_heating': True,

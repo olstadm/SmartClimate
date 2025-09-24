@@ -1599,7 +1599,7 @@ information about HomeForecast operation.
         return jsonify({
             'success': True,
             'message': 'V2.0 API is working',
-            'version': '2.0.7',
+            'version': '2.0.8',
             'enhanced_training_available': HAS_ENHANCED_TRAINING,
             'simple_training_available': globals().get('HAS_SIMPLE_TRAINING', False),
             'training_available': training_available,
@@ -1677,14 +1677,14 @@ information about HomeForecast operation.
                 return jsonify({
                     'success': True,
                     'building_model': {
-                        'building_type': building_model['building_type'],
-                        'floor_area_sqft': building_model['geometry']['floor_area_sqft'],
-                        'time_constant_hours': building_model['rc_parameters']['time_constant_hours'],
+                        'building_type': building_model.get('building_type', 'Unknown'),
+                        'floor_area_sqft': building_model.get('geometry', {}).get('floor_area_sqft', 2000),
+                        'time_constant_hours': building_model.get('rc_parameters', {}).get('time_constant_hours', 8.0),
                         'thermal_properties': {
-                            'material_count': building_model['thermal_properties']['material_count'],
-                            'thermal_time_constant_hours': building_model['thermal_properties']['thermal_time_constant_hours']
+                            'material_count': building_model.get('thermal_properties', {}).get('material_count', 5),
+                            'thermal_time_constant_hours': building_model.get('thermal_properties', {}).get('thermal_time_constant_hours', 8.0)
                         },
-                        'hvac_systems': building_model['hvac_systems'],
+                        'hvac_systems': building_model.get('hvac_systems', {'has_heating': True, 'has_cooling': True}),
                         'upload_timestamp': datetime.now().isoformat()
                     }
                 })
@@ -1782,14 +1782,14 @@ information about HomeForecast operation.
                 # Store weather dataset in homeforecast instance
                 homeforecast_instance.weather_dataset = weather_dataset
                 
-                logger.info(f"✅ Weather dataset uploaded: {weather_dataset['location']['city']}, {weather_dataset['data_points']} hours")
+                logger.info(f"✅ Weather dataset uploaded: {weather_dataset.get('location', {}).get('city', 'Unknown Location')}, {weather_dataset.get('data_points', 0)} hours")
                 
                 return jsonify({
                     'success': True,
                     'weather_dataset': {
-                        'location': weather_dataset['location'],
-                        'data_points': weather_dataset['data_points'],
-                        'summary_statistics': weather_dataset['summary_statistics'],
+                        'location': weather_dataset.get('location', {'city': 'Unknown', 'country': 'Unknown'}),
+                        'data_points': weather_dataset.get('data_points', 0),
+                        'summary_statistics': weather_dataset.get('summary_statistics', {}),
                         'upload_timestamp': datetime.now().isoformat()
                     }
                 })
