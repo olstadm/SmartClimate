@@ -1,5 +1,5 @@
 name: "HomeForecast"
-version: "2.0.6"
+version: "2.0.7"
 slug: "homeforecast-local"
 description: "Smart thermal forecasting for your home - predicts indoor climate and HVAC needs"
 url: "https://github.com/olstadm/SmartClimate"

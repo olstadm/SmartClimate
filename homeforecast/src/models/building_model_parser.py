@@ -32,8 +32,30 @@ class IDFBuildingParser:
         logger.info(f"📋 Parsing DOE building model: {idf_path}")
         
         try:
-            with open(idf_path, 'r', encoding='utf-8') as file:
-                content = file.read()
+            # Try multiple encodings for IDF files
+            content = None
+            encodings_to_try = ['utf-8', 'utf-8-sig', 'ascii', 'latin-1', 'cp1252']
+            
+            for encoding in encodings_to_try:
+                try:
+                    with open(idf_path, 'r', encoding=encoding) as file:
+                        content = file.read()
+                    logger.info(f"✅ Successfully read IDF file with {encoding} encoding")
+                    break
+                except UnicodeDecodeError:
+                    continue
+                    
+            if content is None:
+                raise ValueError("Could not read IDF file with any supported encoding")
+                
+            # Validate basic IDF file structure
+            if not content.strip():
+                raise ValueError("IDF file is empty")
+                
+            # Check for basic IDF markers
+            content_lower = content.lower()
+            if 'building,' not in content_lower and 'zone,' not in content_lower:
+                logger.warning("⚠️  File may not be a valid EnergyPlus IDF file - continuing with basic parsing")
                 
             # Parse different sections
             self._parse_building_geometry(content)
@@ -316,14 +338,34 @@ class EPWWeatherParser:
         logger.info(f"🌤️ Parsing EPW weather file: {epw_path}")
         
         try:
-            with open(epw_path, 'r', encoding='utf-8') as file:
-                lines = file.readlines()
+            # Try multiple encodings for EPW files
+            lines = None
+            encodings_to_try = ['utf-8', 'utf-8-sig', 'ascii', 'latin-1', 'cp1252']
+            
+            for encoding in encodings_to_try:
+                try:
+                    with open(epw_path, 'r', encoding=encoding) as file:
+                        lines = file.readlines()
+                    logger.info(f"✅ Successfully read EPW file with {encoding} encoding ({len(lines)} lines)")
+                    break
+                except UnicodeDecodeError:
+                    continue
+                    
+            if lines is None:
+                raise ValueError("Could not read EPW file with any supported encoding")
+                
+            # Validate basic EPW file structure
+            if len(lines) < 10:
+                raise ValueError("EPW file appears to be incomplete (less than 10 lines)")
                 
             # Parse header (first 8 lines contain metadata)
             self._parse_epw_header(lines[:8])
             
             # Parse weather data (starting from line 9)
-            data_lines = lines[8:8+(limit_hours or len(lines))]
+            max_lines = limit_hours or min(8760, len(lines) - 8)  # Standard year is 8760 hours
+            data_lines = lines[8:8+max_lines]
+            
+            logger.info(f"📊 Processing {len(data_lines)} hours of weather data...")
             self._parse_weather_data(data_lines)
             
             weather_dataset = {

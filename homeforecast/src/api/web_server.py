@@ -687,6 +687,11 @@ def create_app(homeforecast_instance):
     app = Flask(__name__,
                 template_folder=os.path.join(parent_dir, 'templates'),
                 static_folder=os.path.join(parent_dir, 'static'))
+    
+    # Configure file upload limits for building models and weather datasets
+    app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB limit for EPW files
+    app.config['UPLOAD_FOLDER'] = '/tmp/homeforecast_uploads'
+    
     CORS(app)
     
     # Store reference to HomeForecast instance
@@ -1594,7 +1599,7 @@ information about HomeForecast operation.
         return jsonify({
             'success': True,
             'message': 'V2.0 API is working',
-            'version': '2.0.6',
+            'version': '2.0.7',
             'enhanced_training_available': HAS_ENHANCED_TRAINING,
             'simple_training_available': globals().get('HAS_SIMPLE_TRAINING', False),
             'training_available': training_available,
@@ -1626,6 +1631,23 @@ information about HomeForecast operation.
                     'success': False,
                     'error': 'File must be a .idf file'
                 }), 400
+                
+            # Check file size (IDF files should typically be under 10MB)
+            file.seek(0, 2)  # Seek to end
+            file_size = file.tell()
+            file.seek(0)  # Reset to beginning
+            
+            # Convert to MB for user-friendly messages
+            file_size_mb = file_size / (1024 * 1024)
+            
+            if file_size_mb > 25:  # 25MB limit for IDF files
+                return jsonify({
+                    'success': False,
+                    'error': f'Building model file is too large ({file_size_mb:.1f}MB). IDF files are typically under 10MB.',
+                    'details': 'Please verify this is a valid IDF building model file.'
+                }), 413
+            
+            logger.info(f"🏠 Uploading IDF file: {file.filename} ({file_size_mb:.1f}MB)")
                 
             # Check if any training system is available
             if not TrainingSystemClass:
@@ -1676,9 +1698,22 @@ information about HomeForecast operation.
                     
         except Exception as e:
             logger.error(f"❌ Error uploading building model: {e}")
+            
+            # Provide more helpful error messages
+            error_msg = str(e)
+            if "encoding" in error_msg.lower():
+                error_msg = "File encoding issue. Please ensure your IDF file is saved in UTF-8 format."
+            elif "empty" in error_msg.lower():
+                error_msg = "The uploaded file appears to be empty. Please check your IDF file."
+            elif "not a valid" in error_msg.lower():
+                error_msg = "This doesn't appear to be a valid EnergyPlus IDF file. Please upload a proper .idf building model file."
+            else:
+                error_msg = f"Error parsing building model: {error_msg}. The system will use a default building model for training."
+            
             return jsonify({
                 'success': False,
-                'error': f'Error parsing building model: {str(e)}'
+                'error': error_msg,
+                'details': 'If you continue to have issues, the system can use a default building model for basic functionality.'
             }), 500
     
     @app.route('/api/v2/weather-dataset/upload', methods=['POST'])
@@ -1706,6 +1741,23 @@ information about HomeForecast operation.
                 
             # Get optional parameters
             limit_hours = request.form.get('limit_hours', type=int)
+            
+            # Check file size (EPW files should typically be 1-5MB)
+            file.seek(0, 2)  # Seek to end
+            file_size = file.tell()
+            file.seek(0)  # Reset to beginning
+            
+            # Convert to MB for user-friendly messages
+            file_size_mb = file_size / (1024 * 1024)
+            
+            if file_size_mb > 20:  # 20MB limit for EPW files
+                return jsonify({
+                    'success': False,
+                    'error': f'Weather dataset file is too large ({file_size_mb:.1f}MB). EPW files are typically 1-2MB.',
+                    'details': 'Please verify this is a valid EPW weather file and not a different file type.'
+                }), 413
+            
+            logger.info(f"📊 Uploading EPW file: {file.filename} ({file_size_mb:.1f}MB)")
             
             # Check if any training system is available
             if not TrainingSystemClass:
@@ -1751,9 +1803,24 @@ information about HomeForecast operation.
                     
         except Exception as e:
             logger.error(f"❌ Error uploading weather dataset: {e}")
+            
+            # Provide more helpful error messages for EPW files
+            error_msg = str(e)
+            if "file too large" in error_msg.lower() or "413" in error_msg:
+                error_msg = "Weather dataset file is too large. EPW files are typically 1-2MB. Please check if this is a valid EPW file."
+            elif "encoding" in error_msg.lower():
+                error_msg = "File encoding issue. Please ensure your EPW file is saved in UTF-8 format."
+            elif "empty" in error_msg.lower():
+                error_msg = "The uploaded file appears to be empty. Please check your EPW file."
+            elif "not a valid" in error_msg.lower() or "header" in error_msg.lower():
+                error_msg = "This doesn't appear to be a valid EnergyPlus EPW weather file. Please upload a proper .epw weather dataset."
+            else:
+                error_msg = f"Error parsing weather dataset: {error_msg}. Please check that you've uploaded a valid EPW weather file."
+            
             return jsonify({
                 'success': False,
-                'error': f'Error parsing weather dataset: {str(e)}'
+                'error': error_msg,
+                'details': 'EPW files should be from EnergyPlus weather datasets and typically range from 1-2MB in size.'
             }), 500
     
     @app.route('/api/v2/training/run', methods=['POST'])
