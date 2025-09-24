@@ -31,10 +31,19 @@ try:
     from ..models.enhanced_training_system import EnhancedTrainingSystem
     HAS_ENHANCED_TRAINING = True
     ENHANCED_TRAINING_ERROR = None
+    TrainingSystemClass = EnhancedTrainingSystem
 except ImportError as e:
     HAS_ENHANCED_TRAINING = False
     ENHANCED_TRAINING_ERROR = str(e)
-    # Don't use logger here as it may not be initialized yet
+    # Try to import simple training system as fallback
+    try:
+        from ..models.simple_training_system import SimpleTrainingSystem
+        TrainingSystemClass = SimpleTrainingSystem
+        HAS_SIMPLE_TRAINING = True
+    except ImportError as e2:
+        HAS_SIMPLE_TRAINING = False
+        TrainingSystemClass = None
+        ENHANCED_TRAINING_ERROR += f"; SimpleTrainingSystem also failed: {e2}"
 
 
 def format_time_consistent(dt, include_seconds=False) -> str:
@@ -1564,11 +1573,16 @@ information about HomeForecast operation.
     @app.route('/api/v2/test', methods=['GET'])
     def test_v2_api():
         """Test endpoint to verify v2.0 API is working"""
+        training_available = HAS_ENHANCED_TRAINING or (not HAS_ENHANCED_TRAINING and 'HAS_SIMPLE_TRAINING' in globals() and HAS_SIMPLE_TRAINING)
         return jsonify({
             'success': True,
             'message': 'V2.0 API is working',
-            'version': '2.0.3',
+            'version': '2.0.5',
             'enhanced_training_available': HAS_ENHANCED_TRAINING,
+            'simple_training_available': globals().get('HAS_SIMPLE_TRAINING', False),
+            'training_available': training_available,
+            'training_system': 'Enhanced' if HAS_ENHANCED_TRAINING else ('Simple' if globals().get('HAS_SIMPLE_TRAINING', False) else 'None'),
+            'enhanced_training_error': ENHANCED_TRAINING_ERROR if not HAS_ENHANCED_TRAINING else None,
             'timestamp': datetime.now().isoformat()
         })
     
@@ -1596,14 +1610,14 @@ information about HomeForecast operation.
                     'error': 'File must be a .idf file'
                 }), 400
                 
-            # Check if enhanced training is available
-            if not HAS_ENHANCED_TRAINING:
-                error_msg = f'Enhanced training system not available: {ENHANCED_TRAINING_ERROR or "Unknown import error"}'
+            # Check if any training system is available
+            if not TrainingSystemClass:
+                error_msg = f'No training system available: {ENHANCED_TRAINING_ERROR or "Unknown import error"}'
                 logger.error(error_msg)
                 return jsonify({
                     'success': False,
                     'error': error_msg,
-                    'details': 'This may be due to missing Python packages (numpy) or import issues. Please check server logs.'
+                    'details': 'Both enhanced and simple training systems failed to import. Please check server logs.'
                 }), 500
                 
             # Save uploaded file temporarily
@@ -1612,8 +1626,8 @@ information about HomeForecast operation.
                 tmp_path = tmp_file.name
                 
             try:
-                # Parse building model
-                training_system = EnhancedTrainingSystem(homeforecast_instance.thermal_model)
+                # Parse building model using available training system
+                training_system = TrainingSystemClass(homeforecast_instance.thermal_model)
                 building_model = training_system.load_building_model(tmp_path)
                 
                 # Store building model in homeforecast instance
@@ -1676,14 +1690,14 @@ information about HomeForecast operation.
             # Get optional parameters
             limit_hours = request.form.get('limit_hours', type=int)
             
-            # Check if enhanced training is available
-            if not HAS_ENHANCED_TRAINING:
-                error_msg = f'Enhanced training system not available: {ENHANCED_TRAINING_ERROR or "Unknown import error"}'
+            # Check if any training system is available
+            if not TrainingSystemClass:
+                error_msg = f'No training system available: {ENHANCED_TRAINING_ERROR or "Unknown import error"}'
                 logger.error(error_msg)
                 return jsonify({
                     'success': False,
                     'error': error_msg,
-                    'details': 'This may be due to missing Python packages (numpy) or import issues. Please check server logs.'
+                    'details': 'Both enhanced and simple training systems failed to import. Please check server logs.'
                 }), 500
             
             # Save uploaded file temporarily
@@ -1692,8 +1706,8 @@ information about HomeForecast operation.
                 tmp_path = tmp_file.name
                 
             try:
-                # Parse weather dataset
-                training_system = EnhancedTrainingSystem(homeforecast_instance.thermal_model)
+                # Parse weather dataset using available training system
+                training_system = TrainingSystemClass(homeforecast_instance.thermal_model)
                 weather_dataset = training_system.load_weather_dataset(tmp_path, limit_hours)
                 
                 # Store weather dataset in homeforecast instance
@@ -1749,18 +1763,18 @@ information about HomeForecast operation.
             comfort_min = data.get('comfort_min', 68.0)
             comfort_max = data.get('comfort_max', 76.0)
             
-            # Check if enhanced training is available
-            if not HAS_ENHANCED_TRAINING:
-                error_msg = f'Enhanced training system not available: {ENHANCED_TRAINING_ERROR or "Unknown import error"}'
+            # Check if any training system is available
+            if not TrainingSystemClass:
+                error_msg = f'No training system available: {ENHANCED_TRAINING_ERROR or "Unknown import error"}'
                 logger.error(error_msg)
                 return jsonify({
                     'success': False,
                     'error': error_msg,
-                    'details': 'This may be due to missing Python packages (numpy) or import issues. Please check server logs.'
+                    'details': 'Both enhanced and simple training systems failed to import. Please check server logs.'
                 }), 500
             
-            # Run enhanced training
-            training_system = EnhancedTrainingSystem(homeforecast_instance.thermal_model)
+            # Run training using available system
+            training_system = TrainingSystemClass(homeforecast_instance.thermal_model)
             training_system.building_model = homeforecast_instance.building_model
             training_system.weather_dataset = homeforecast_instance.weather_dataset
             
