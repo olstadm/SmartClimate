@@ -1567,12 +1567,49 @@ class HomeForecastDashboard {
         }
     }
 
+    // Server Connectivity Check
+    async checkServerConnectivity() {
+        try {
+            console.log('Checking server connectivity...');
+            const response = await fetch('/api/v2/test', { 
+                method: 'GET'
+            });
+            console.log('Server connectivity check - Status:', response.status, 'OK:', response.ok);
+            
+            if (response.ok) {
+                const result = await response.json();
+                console.log('V2.0 API test result:', result);
+                return { 
+                    connected: true, 
+                    enhanced_training_available: result.enhanced_training_available 
+                };
+            }
+            return { connected: false, error: `HTTP ${response.status}` };
+        } catch (error) {
+            console.error('Server connectivity failed:', error);
+            return { connected: false, error: error.message };
+        }
+    }
+
     // V2.0 Enhanced Training Functions
     initV2Training() {
         // Set up V2.0 event listeners
         this.setupV2EventListeners();
         this.updateV2Status();
         this.updateComfortBandDisplay();
+        
+        // Check server connectivity
+        this.checkServerConnectivity().then(result => {
+            if (!result.connected) {
+                console.warn('Server connectivity issues detected:', result.error);
+                this.showNotification(`Warning: Server connectivity issues - ${result.error}. File uploads may fail.`, 'warning');
+            } else if (!result.enhanced_training_available) {
+                console.warn('Enhanced training system not available');
+                this.showNotification('Warning: Enhanced training system not available on server.', 'warning');
+            } else {
+                console.log('V2.0 API connectivity confirmed');
+            }
+        });
     }
 
     setupV2EventListeners() {
@@ -1677,12 +1714,54 @@ class HomeForecastDashboard {
         formData.append('file', file);
 
         try {
+            console.log('Attempting to upload to:', '/api/v2/building-model/upload');
             const response = await fetch('/api/v2/building-model/upload', {
                 method: 'POST',
                 body: formData
             });
 
-            const result = await response.json();
+            console.log('Upload response status:', response.status, response.statusText);
+            
+            if (!response.ok) {
+                // Try to get error message from response
+                let errorMsg = `HTTP ${response.status}: ${response.statusText}`;
+                try {
+                    const errorData = await response.json();
+                    if (errorData.error) {
+                        errorMsg = errorData.error;
+                        if (errorData.details) {
+                            errorMsg += ` (${errorData.details})`;
+                        }
+                    }
+                } catch (jsonError) {
+                    // If JSON parsing fails, try to get text
+                    try {
+                        const errorText = await response.text();
+                        if (errorText.includes('<html>')) {
+                            errorMsg += ' - Server returned HTML error page';
+                        } else {
+                            errorMsg += ` - ${errorText.substring(0, 100)}`;
+                        }
+                    } catch (textError) {
+                        // Keep original error message
+                    }
+                }
+                throw new Error(errorMsg);
+            }
+
+            let result;
+            try {
+                result = await response.json();
+            } catch (jsonError) {
+                const responseText = await response.text();
+                console.error('JSON parsing failed. Response text:', responseText.substring(0, 200));
+                if (responseText.includes('<html>')) {
+                    throw new Error('Server returned HTML error page instead of JSON response');
+                } else {
+                    throw new Error(`Invalid JSON response: ${jsonError.message}`);
+                }
+            }
+            console.log('Upload result:', result);
 
             if (result.success) {
                 this.showNotification(`Building model uploaded successfully: ${result.building_model.building_type}`, 'success');
@@ -1692,7 +1771,12 @@ class HomeForecastDashboard {
                 this.showNotification(`Upload failed: ${result.error}`, 'error');
             }
         } catch (error) {
-            this.showNotification(`Upload error: ${error.message}`, 'error');
+            console.error('Upload error details:', error);
+            if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                this.showNotification(`Connection error: Unable to reach server. Please check if the HomeForecast service is running.`, 'error');
+            } else {
+                this.showNotification(`Upload error: ${error.message}`, 'error');
+            }
         }
     }
 
@@ -1714,12 +1798,54 @@ class HomeForecastDashboard {
         }
 
         try {
+            console.log('Attempting to upload to:', '/api/v2/weather-dataset/upload');
             const response = await fetch('/api/v2/weather-dataset/upload', {
                 method: 'POST',
                 body: formData
             });
 
-            const result = await response.json();
+            console.log('Upload response status:', response.status, response.statusText);
+            
+            if (!response.ok) {
+                // Try to get error message from response
+                let errorMsg = `HTTP ${response.status}: ${response.statusText}`;
+                try {
+                    const errorData = await response.json();
+                    if (errorData.error) {
+                        errorMsg = errorData.error;
+                        if (errorData.details) {
+                            errorMsg += ` (${errorData.details})`;
+                        }
+                    }
+                } catch (jsonError) {
+                    // If JSON parsing fails, try to get text
+                    try {
+                        const errorText = await response.text();
+                        if (errorText.includes('<html>')) {
+                            errorMsg += ' - Server returned HTML error page';
+                        } else {
+                            errorMsg += ` - ${errorText.substring(0, 100)}`;
+                        }
+                    } catch (textError) {
+                        // Keep original error message
+                    }
+                }
+                throw new Error(errorMsg);
+            }
+
+            let result;
+            try {
+                result = await response.json();
+            } catch (jsonError) {
+                const responseText = await response.text();
+                console.error('JSON parsing failed. Response text:', responseText.substring(0, 200));
+                if (responseText.includes('<html>')) {
+                    throw new Error('Server returned HTML error page instead of JSON response');
+                } else {
+                    throw new Error(`Invalid JSON response: ${jsonError.message}`);
+                }
+            }
+            console.log('Upload result:', result);
 
             if (result.success) {
                 this.showNotification(`Weather dataset uploaded: ${result.weather_dataset.location.city}`, 'success');
@@ -1729,7 +1855,12 @@ class HomeForecastDashboard {
                 this.showNotification(`Upload failed: ${result.error}`, 'error');
             }
         } catch (error) {
-            this.showNotification(`Upload error: ${error.message}`, 'error');
+            console.error('Upload error details:', error);
+            if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                this.showNotification(`Connection error: Unable to reach server. Please check if the HomeForecast service is running.`, 'error');
+            } else {
+                this.showNotification(`Upload error: ${error.message}`, 'error');
+            }
         }
     }
 
@@ -1896,6 +2027,7 @@ class HomeForecastDashboard {
         this.updateTrainingProgress(0, 'Initializing enhanced training...', {});
 
         try {
+            console.log('Attempting training request to:', '/api/v2/training/run');
             const response = await fetch('/api/v2/training/run', {
                 method: 'POST',
                 headers: {
@@ -1909,10 +2041,17 @@ class HomeForecastDashboard {
                 })
             });
 
+            console.log('Training response status:', response.status, response.statusText);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
             // Simulate progress updates during training
             this.simulateTrainingProgress(duration, scenarios);
 
             const result = await response.json();
+            console.log('Training result:', result);
 
             if (result.success) {
                 this.updateTrainingProgress(100, 'Training completed successfully!', {
@@ -1931,7 +2070,12 @@ class HomeForecastDashboard {
             }
 
         } catch (error) {
-            this.showNotification(`Training error: ${error.message}`, 'error');
+            console.error('Training error details:', error);
+            if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                this.showNotification(`Connection error: Unable to reach server. Please check if the HomeForecast service is running.`, 'error');
+            } else {
+                this.showNotification(`Training error: ${error.message}`, 'error');
+            }
             progressSection.style.display = 'none';
         } finally {
             trainBtn.disabled = false;

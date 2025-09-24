@@ -30,9 +30,11 @@ except ImportError:
 try:
     from ..models.enhanced_training_system import EnhancedTrainingSystem
     HAS_ENHANCED_TRAINING = True
+    ENHANCED_TRAINING_ERROR = None
 except ImportError as e:
-    logger.warning(f"Enhanced training system not available: {e}")
     HAS_ENHANCED_TRAINING = False
+    ENHANCED_TRAINING_ERROR = str(e)
+    # Don't use logger here as it may not be initialized yet
 
 
 def format_time_consistent(dt, include_seconds=False) -> str:
@@ -801,7 +803,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '2.0.2',
+                'addon_version': '2.0.3',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -838,7 +840,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '2.0.2',
+                'version': '2.0.3',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
@@ -1558,6 +1560,18 @@ information about HomeForecast operation.
         """V2.0 Building Model Manager page"""
         return render_template('building_model_manager.html')
     
+    # V2.0 API Test Endpoint
+    @app.route('/api/v2/test', methods=['GET'])
+    def test_v2_api():
+        """Test endpoint to verify v2.0 API is working"""
+        return jsonify({
+            'success': True,
+            'message': 'V2.0 API is working',
+            'version': '2.0.3',
+            'enhanced_training_available': HAS_ENHANCED_TRAINING,
+            'timestamp': datetime.now().isoformat()
+        })
+    
     # V2.0 Building Model and Weather File Upload Endpoints
     @app.route('/api/v2/building-model/upload', methods=['POST'])
     def upload_building_model():
@@ -1584,9 +1598,12 @@ information about HomeForecast operation.
                 
             # Check if enhanced training is available
             if not HAS_ENHANCED_TRAINING:
+                error_msg = f'Enhanced training system not available: {ENHANCED_TRAINING_ERROR or "Unknown import error"}'
+                logger.error(error_msg)
                 return jsonify({
                     'success': False,
-                    'error': 'Enhanced training system not available'
+                    'error': error_msg,
+                    'details': 'This may be due to missing Python packages (numpy) or import issues. Please check server logs.'
                 }), 500
                 
             # Save uploaded file temporarily
@@ -1661,9 +1678,12 @@ information about HomeForecast operation.
             
             # Check if enhanced training is available
             if not HAS_ENHANCED_TRAINING:
+                error_msg = f'Enhanced training system not available: {ENHANCED_TRAINING_ERROR or "Unknown import error"}'
+                logger.error(error_msg)
                 return jsonify({
                     'success': False,
-                    'error': 'Enhanced training system not available'
+                    'error': error_msg,
+                    'details': 'This may be due to missing Python packages (numpy) or import issues. Please check server logs.'
                 }), 500
             
             # Save uploaded file temporarily
@@ -1731,9 +1751,12 @@ information about HomeForecast operation.
             
             # Check if enhanced training is available
             if not HAS_ENHANCED_TRAINING:
+                error_msg = f'Enhanced training system not available: {ENHANCED_TRAINING_ERROR or "Unknown import error"}'
+                logger.error(error_msg)
                 return jsonify({
                     'success': False,
-                    'error': 'Enhanced training system not available'
+                    'error': error_msg,
+                    'details': 'This may be due to missing Python packages (numpy) or import issues. Please check server logs.'
                 }), 500
             
             # Run enhanced training
@@ -1777,7 +1800,7 @@ information about HomeForecast operation.
             training_completed = hasattr(homeforecast_instance, 'training_results') and homeforecast_instance.training_results
             
             status = {
-                'version': '2.0.2',
+                'version': '2.0.3',
                 'building_model_loaded': building_model_loaded,
                 'weather_dataset_loaded': weather_dataset_loaded,
                 'training_completed': training_completed,
@@ -1812,7 +1835,7 @@ information about HomeForecast operation.
         except Exception as e:
             logger.error(f"❌ Error getting v2.0 model status: {e}")
             return jsonify({
-                'version': '2.0.2',
+                'version': '2.0.3',
                 'error': f'Error getting model status: {str(e)}',
                 'building_model_loaded': False,
                 'weather_dataset_loaded': False,

@@ -4,13 +4,39 @@ Integrates DOE building models and EPW weather data for accurate thermal predict
 """
 import logging
 import json
-import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
-from .building_model_parser import IDFBuildingParser, EPWWeatherParser
-from .thermal_model import ThermalModel
+# Handle numpy import gracefully
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
+    # Create mock numpy for basic operations
+    class MockNumpy:
+        @staticmethod
+        def array(data):
+            return list(data)
+        @staticmethod
+        def mean(data):
+            return sum(data) / len(data) if data else 0
+        @staticmethod
+        def std(data):
+            if not data or len(data) < 2:
+                return 0
+            mean_val = sum(data) / len(data)
+            return (sum((x - mean_val) ** 2 for x in data) / (len(data) - 1)) ** 0.5
+    np = MockNumpy()
+
+try:
+    from .building_model_parser import IDFBuildingParser, EPWWeatherParser
+    from .thermal_model import ThermalModel
+    HAS_DEPENDENCIES = True
+except ImportError as e:
+    HAS_DEPENDENCIES = False
+    DEPENDENCY_ERROR = str(e)
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +44,10 @@ logger = logging.getLogger(__name__)
 class EnhancedTrainingSystem:
     """Enhanced training system using DOE building models and EPW weather data"""
     
-    def __init__(self, thermal_model: ThermalModel):
+    def __init__(self, thermal_model):
+        if not HAS_DEPENDENCIES:
+            raise ImportError(f"Enhanced training system dependencies not available: {DEPENDENCY_ERROR}")
+        
         self.thermal_model = thermal_model
         self.idf_parser = IDFBuildingParser()
         self.epw_parser = EPWWeatherParser()
@@ -400,7 +429,7 @@ class EnhancedTrainingSystem:
             
         output_data = {
             'timestamp': datetime.now().isoformat(),
-            'version': '2.0.2',
+            'version': '2.0.3',
             'building_model': self.building_model,
             'weather_dataset_info': {
                 'location': self.weather_dataset.get('location', {}),
