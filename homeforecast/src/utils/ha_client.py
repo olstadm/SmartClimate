@@ -75,8 +75,17 @@ class HomeAssistantClient:
             
     async def disconnect(self):
         """Close connection"""
-        if self.session:
+        if self.session and not self.session.closed:
             await self.session.close()
+            logger.debug("Home Assistant session closed")
+    
+    async def _ensure_session(self):
+        """Ensure we have a valid aiohttp session"""
+        if not self.session or self.session.closed:
+            logger.info("Creating new Home Assistant session")
+            timeout = aiohttp.ClientTimeout(total=30)
+            self.session = aiohttp.ClientSession(timeout=timeout)
+        return self.session
 
     async def get_ha_config(self) -> Optional[Dict]:
         """Get Home Assistant configuration including timezone"""
@@ -374,13 +383,23 @@ class HomeAssistantClient:
         if not entity_id:
             logger.warning(f"No entity_id provided for {sensor_type}")
             return None
+        
+        # Ensure we have a valid session
+        try:
+            await self._ensure_session()
+        except Exception as e:
+            logger.error(f"Failed to ensure session: {e}")
+            return None
             
         for attempt in range(retries + 1):
             try:
+                # Create a timeout object properly
+                timeout = aiohttp.ClientTimeout(total=10)
+                
                 async with self.session.get(
                     f"{self.base_url}/states/{entity_id}",
                     headers=self.headers,
-                    timeout=aiohttp.ClientTimeout(total=10)  # 10 second timeout
+                    timeout=timeout
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
@@ -420,6 +439,12 @@ class HomeAssistantClient:
                 return None
             except Exception as e:
                 logger.warning(f"Error getting state for {entity_id} on attempt {attempt + 1}: {e}")
+                # If it's a session error, try to recreate session
+                if 'closed' in str(e).lower() or 'timeout context manager' in str(e).lower():
+                    try:
+                        await self._ensure_session()
+                    except:
+                        pass
                 if attempt < retries:
                     await asyncio.sleep(1)
                     continue

@@ -152,13 +152,34 @@ class ThermalModel:
         try:
             logger.info("🏠 Updating thermal model with sensor data...")
             
-            # Extract required values
-            t_in = sensor_data['indoor_temp']
-            t_out = sensor_data.get('outdoor_temp', t_in)
-            h_in = sensor_data.get('indoor_humidity', 50)
-            h_out = sensor_data.get('outdoor_humidity', h_in)
+            # Extract required values with None handling
+            t_in = sensor_data.get('indoor_temp')
+            t_out = sensor_data.get('outdoor_temp')
+            h_in = sensor_data.get('indoor_humidity')
+            h_out = sensor_data.get('outdoor_humidity')
             hvac_state = sensor_data.get('hvac_state', 'off')
             solar = sensor_data.get('solar_irradiance', 0)
+            
+            # Handle None values with sensible fallbacks
+            if t_in is None:
+                logger.error("❌ Indoor temperature is None - cannot update model")
+                return
+                
+            if t_out is None:
+                logger.warning("🌡️ Outdoor temperature is None - using cached value or indoor temp")
+                # Try to use cached outdoor temp or fallback to indoor
+                t_out = getattr(self, '_last_outdoor_temp', t_in)
+                
+            if h_in is None:
+                h_in = 50.0  # Default indoor humidity
+                logger.warning(f"💧 Indoor humidity is None - using default {h_in}%")
+                
+            if h_out is None:
+                h_out = h_in  # Use indoor humidity as fallback
+                logger.warning(f"💧 Outdoor humidity is None - using indoor humidity {h_out}%")
+            
+            # Cache outdoor temperature for future use
+            self._last_outdoor_temp = t_out
             
             logger.info(f"Sensor data - Indoor: {t_in}°F, Outdoor: {t_out}°F, Humidity: {h_in}%, HVAC: {hvac_state}")
             
@@ -243,13 +264,30 @@ class ThermalModel:
         # Calculate enthalpy difference (simplified)
         h_diff = self._calculate_enthalpy_diff(t_out, h_out, t_in, h_in)
         
-        # Clean natural physics vector: [T_out - T_in, 0, 0, 1, h_diff, solar]
-        # Zero out HVAC coefficients for pure natural thermal response
+        # Clean natural physics vector with physics-corrected baseline
+        temp_diff = t_out - t_in
+        
+        # For natural thermal response, baseline should support physics, not fight it
+        # If baseline drift would cause wrong-direction temperature change, zero it out
+        baseline_multiplier = 1.0
+        if hasattr(self, 'rls') and len(self.rls.theta) > 3:
+            baseline_drift = self.rls.theta[3]  # Baseline coefficient
+            
+            # If baseline would cause cooling when outdoor warmer (or vice versa)
+            if abs(temp_diff) > 0.5:  # Significant temperature difference
+                if temp_diff > 0.5 and baseline_drift < -0.1:  # Should warm but baseline cools
+                    baseline_multiplier = 0.0  # Zero out problematic baseline
+                    logger.debug(f"🔬 Zeroing cooling baseline ({baseline_drift:.3f}) when outdoor {temp_diff:.1f}°F warmer")
+                elif temp_diff < -0.5 and baseline_drift > 0.1:  # Should cool but baseline warms
+                    baseline_multiplier = 0.0  # Zero out problematic baseline
+                    logger.debug(f"🔬 Zeroing warming baseline ({baseline_drift:.3f}) when outdoor {abs(temp_diff):.1f}°F cooler")
+        
+        # Clean natural physics vector: [T_out - T_in, 0, 0, baseline_corrected, h_diff, solar]
         phi = np.array([
-            t_out - t_in,    # Temperature difference (primary driver)
+            temp_diff,       # Temperature difference (primary driver)
             0.0,             # NO heating influence
             0.0,             # NO cooling influence  
-            1.0,             # Constant (for baseline drift)
+            baseline_multiplier,  # Baseline (zeroed if contradicts physics)
             h_diff,          # Enthalpy difference
             solar / 1000.0   # Solar irradiance (normalized)
         ])
@@ -259,6 +297,16 @@ class ThermalModel:
     def _calculate_enthalpy_diff(self, t_out: float, rh_out: float,
                                  t_in: float, rh_in: float) -> float:
         """Calculate enthalpy difference between outdoor and indoor air"""
+        # Handle None values with fallbacks
+        if t_out is None:
+            t_out = t_in  # Use indoor temp as fallback
+            logger.warning("🌡️ Using indoor temp as outdoor temp fallback for enthalpy calculation")
+        if rh_out is None:
+            rh_out = rh_in if rh_in is not None else 50.0  # Use indoor RH or default
+            logger.warning("💧 Using fallback humidity for enthalpy calculation")
+        if rh_in is None:
+            rh_in = 50.0  # Default indoor humidity
+            
         # Simplified psychrometric calculation
         # Specific humidity from RH and temperature
         def specific_humidity(T, RH):
@@ -355,8 +403,13 @@ class ThermalModel:
             outdoor_range = max(outdoor_temps) - min(outdoor_temps)
             
             # Predict expected indoor response based on TEMPERATURE DIFFERENTIAL, not outdoor trend
-            current_outdoor = current_conditions.get('outdoor_temp', 70.0)
+            current_outdoor = current_conditions.get('outdoor_temp')
             current_indoor = current_conditions.get('indoor_temp', 70.0)
+            
+            # Handle None outdoor temperature
+            if current_outdoor is None:
+                logger.warning("🌡️ Outdoor temperature is None, using indoor temp for trend analysis")
+                current_outdoor = current_indoor  # Fallback to indoor temp
             
             # Use thermal model parameters to predict indoor response
             thermal_coupling = abs(self.rls.theta[0]) if len(self.rls.theta) > 0 else 0.1  # 'a' parameter
@@ -563,6 +616,13 @@ class ThermalModel:
             clean_theta[1] = 0.0  # Zero heating coefficient
             clean_theta[2] = 0.0  # Zero cooling coefficient  
             dT_dt = np.dot(phi, clean_theta)
+            
+            # Log the calculation details for debugging
+            if abs(dT_dt) > 0.1 or (t_out - t_in) * dT_dt < 0:  # Log significant changes or physics violations
+                logger.info(f"🔬 Natural physics calculation:")
+                logger.info(f"   T_diff: {t_out - t_in:.2f}°F, phi: {phi}")
+                logger.info(f"   clean_theta: {clean_theta}")
+                logger.info(f"   Raw dT_dt: {dT_dt:.4f}°F/hr")
         else:
             # Normal prediction with all parameters for HVAC scenarios
             phi = self._build_feature_vector(t_in, t_out, h_in, h_out, hvac_state, solar)
@@ -760,14 +820,38 @@ class ThermalModel:
                 
                 # The enhanced training system provides theta array with validated physics parameters
                 if 'theta' in model_params:
-                    validated_theta = np.array(model_params['theta'])
-                    if len(validated_theta) == len(self.rls.theta):
-                        logger.info(f"📊 Applying validated theta parameters: {validated_theta}")
-                        self.rls.theta = validated_theta
-                        
-                        # Also update thermal_model.theta if it exists (from building model integration)
-                        if hasattr(self, 'theta'):
-                            self.theta = validated_theta[0]  # The 'a' parameter (1/τ)
+                    theta_data = model_params['theta']
+                    
+                    # Handle various theta formats
+                    if theta_data is None:
+                        logger.warning("⚠️ Theta data is None, skipping parameter update")
+                    else:
+                        try:
+                            validated_theta = np.array(theta_data)
+                            
+                            # Ensure it's a 1D array
+                            if validated_theta.ndim == 0:
+                                # Scalar value - convert to array
+                                validated_theta = np.array([validated_theta])
+                            elif validated_theta.ndim > 1:
+                                # Multi-dimensional - flatten
+                                validated_theta = validated_theta.flatten()
+                                
+                            # Check if dimensions match
+                            if len(validated_theta) == len(self.rls.theta):
+                                logger.info(f"📊 Applying validated theta parameters: {validated_theta}")
+                                self.rls.theta = validated_theta
+                                
+                                # Also update thermal_model.theta if it exists (from building model integration)
+                                if hasattr(self, 'theta'):
+                                    self.theta = validated_theta[0]  # The 'a' parameter (1/τ)
+                            else:
+                                logger.warning(f"⚠️ Theta dimension mismatch: got {len(validated_theta)}, expected {len(self.rls.theta)}")
+                                
+                        except Exception as e:
+                            logger.error(f"❌ Error processing theta parameters: {e}")
+                            logger.debug(f"   Theta data type: {type(theta_data)}")
+                            logger.debug(f"   Theta data: {theta_data}")
                     
             # Apply building-specific parameters if available
             if 'building_type' in training_results:
@@ -821,32 +905,50 @@ class ThermalModel:
             logger.info("   Purpose: Remove HVAC contamination from natural thermal parameters")
             
             # Get historical data for retraining
-            historical_data = await self.data_store.get_recent_data(hours=168)  # Last week
+            historical_data = await self.data_store.get_recent_measurements(hours=168)  # Last week
             if not historical_data or len(historical_data) < 20:
-                logger.warning("⚠️ Insufficient historical data for retroactive correction")
+                logger.warning(f"⚠️ Insufficient historical data for retroactive correction: {len(historical_data) if historical_data else 0} points")
                 return
                 
             logger.info(f"   Available historical data: {len(historical_data)} points")
             
+            # Debug: Check data format
+            if historical_data:
+                first_point = historical_data[0]
+                logger.debug(f"   Sample data point keys: {list(first_point.keys()) if isinstance(first_point, dict) else type(first_point)}")
+            
             # Filter for natural thermal data only (HVAC off/idle)
             natural_data = []
             hvac_data = []
+            processing_errors = 0
             
-            for point in historical_data:
-                hvac_state = point.get('hvac_state', 'unknown')
-                if hvac_state in ['off', 'idle', 'unknown']:
-                    natural_data.append(point)
-                else:
-                    hvac_data.append(point)
-                    
+            for i, point in enumerate(historical_data):
+                try:
+                    # Ensure point is a dictionary
+                    if not isinstance(point, dict):
+                        logger.warning(f"   Data point {i} is not a dict: {type(point)}")
+                        processing_errors += 1
+                        continue
+                        
+                    hvac_state = point.get('hvac_state', 'unknown')
+                    if hvac_state in ['off', 'idle', 'unknown']:
+                        natural_data.append(point)
+                    else:
+                        hvac_data.append(point)
+                        
+                except Exception as e:
+                    logger.warning(f"   Error processing data point {i}: {e}")
+                    processing_errors += 1
+                    continue
+                        
             logger.info(f"   Natural thermal points: {len(natural_data)}")
             logger.info(f"   HVAC-active points: {len(hvac_data)} (excluded)")
+            if processing_errors > 0:
+                logger.warning(f"   Data processing errors: {processing_errors}")
             
             if len(natural_data) < 10:
                 logger.warning("⚠️ Insufficient natural thermal data for correction")
-                return
-                
-            # Create a separate RLS instance for natural parameters only
+                return            # Create a separate RLS instance for natural parameters only
             natural_rls = RecursiveLeastSquares(n_params=6, forgetting_factor=0.98)
             
             # Train only on natural thermal data with strict physics validation
