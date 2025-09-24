@@ -28,7 +28,16 @@ except ImportError:
 
 # Import V2.0 components
 try:
-    from ..models.enhanced_training_system import EnhancedTrainingSystem
+    # Try relative imports first
+    try:
+        from ..models.enhanced_training_system import EnhancedTrainingSystem
+    except ImportError:
+        # Fallback to absolute imports
+        import sys
+        import os
+        sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'models'))
+        from enhanced_training_system import EnhancedTrainingSystem
+    
     HAS_ENHANCED_TRAINING = True
     ENHANCED_TRAINING_ERROR = None
     TrainingSystemClass = EnhancedTrainingSystem
@@ -37,7 +46,15 @@ except ImportError as e:
     ENHANCED_TRAINING_ERROR = str(e)
     # Try to import simple training system as fallback
     try:
-        from ..models.simple_training_system import SimpleTrainingSystem
+        try:
+            from ..models.simple_training_system import SimpleTrainingSystem
+        except ImportError:
+            # Fallback to absolute imports
+            import sys
+            import os
+            sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'models'))
+            from simple_training_system import SimpleTrainingSystem
+        
         TrainingSystemClass = SimpleTrainingSystem
         HAS_SIMPLE_TRAINING = True
     except ImportError as e2:
@@ -1577,7 +1594,7 @@ information about HomeForecast operation.
         return jsonify({
             'success': True,
             'message': 'V2.0 API is working',
-            'version': '2.0.5',
+            'version': '2.0.6',
             'enhanced_training_available': HAS_ENHANCED_TRAINING,
             'simple_training_available': globals().get('HAS_SIMPLE_TRAINING', False),
             'training_available': training_available,

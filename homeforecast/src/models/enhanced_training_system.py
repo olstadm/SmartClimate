@@ -31,8 +31,14 @@ except ImportError:
     np = MockNumpy()
 
 try:
-    from .building_model_parser import IDFBuildingParser, EPWWeatherParser
-    from .thermal_model import ThermalModel
+    # Try relative imports first
+    try:
+        from .building_model_parser import IDFBuildingParser, EPWWeatherParser
+        from .thermal_model import ThermalModel
+    except ImportError:
+        # Fallback to absolute imports
+        from building_model_parser import IDFBuildingParser, EPWWeatherParser
+        from thermal_model import ThermalModel
     HAS_DEPENDENCIES = True
 except ImportError as e:
     HAS_DEPENDENCIES = False
