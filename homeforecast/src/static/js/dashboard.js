@@ -235,6 +235,7 @@ class HomeForecastDashboard {
         // Update status indicator
         const statusEl = document.getElementById('status');
         if (statusEl) {
+            statusEl.classList.remove('loading');
             statusEl.textContent = status.status || 'Unknown';
             statusEl.className = 'status status-' + (status.status === 'running' ? 'ok' : 'error');
         }
@@ -242,6 +243,7 @@ class HomeForecastDashboard {
         // Update last update time
         const lastUpdateEl = document.getElementById('lastUpdate');
         if (lastUpdateEl) {
+            lastUpdateEl.classList.remove('loading');
             if (status.last_update_display) {
                 lastUpdateEl.textContent = status.last_update_display;
             } else if (status.last_update) {
@@ -273,8 +275,10 @@ class HomeForecastDashboard {
         // Update current temperature from current sensor data
         const currentTempEl = document.getElementById('currentTemp');
         if (currentTempEl && status.current_data && status.current_data.indoor_temp) {
+            currentTempEl.classList.remove('loading');
             currentTempEl.textContent = status.current_data.indoor_temp.toFixed(1) + '°F';
         } else if (currentTempEl) {
+            currentTempEl.classList.remove('loading');
             currentTempEl.textContent = '-';
         }
 
@@ -286,11 +290,26 @@ class HomeForecastDashboard {
             const smartHvacEnabledEl = document.getElementById('smartHvacEnabled');
             const updateIntervalEl = document.getElementById('updateInterval');
             
-            if (comfortMinEl) comfortMinEl.textContent = status.config.comfort_min + '°F';
-            if (comfortMaxEl) comfortMaxEl.textContent = status.config.comfort_max + '°F';
-            if (mlEnabledEl) mlEnabledEl.textContent = status.config.ml_enabled ? 'Enabled' : 'Disabled';
-            if (smartHvacEnabledEl) smartHvacEnabledEl.textContent = status.config.smart_hvac_enabled ? 'Enabled' : 'Disabled';
-            if (updateIntervalEl) updateIntervalEl.textContent = status.config.update_interval + ' min';
+            if (comfortMinEl) {
+                comfortMinEl.classList.remove('loading');
+                comfortMinEl.textContent = status.config.comfort_min + '°F';
+            }
+            if (comfortMaxEl) {
+                comfortMaxEl.classList.remove('loading');
+                comfortMaxEl.textContent = status.config.comfort_max + '°F';
+            }
+            if (mlEnabledEl) {
+                mlEnabledEl.classList.remove('loading');
+                mlEnabledEl.textContent = status.config.ml_enabled ? 'Enabled' : 'Disabled';
+            }
+            if (smartHvacEnabledEl) {
+                smartHvacEnabledEl.classList.remove('loading');
+                smartHvacEnabledEl.textContent = status.config.smart_hvac_enabled ? 'Enabled' : 'Disabled';
+            }
+            if (updateIntervalEl) {
+                updateIntervalEl.classList.remove('loading');
+                updateIntervalEl.textContent = status.config.update_interval + ' min';
+            }
         }
 
         // Update climate action insights
@@ -309,6 +328,7 @@ class HomeForecastDashboard {
         
         const recommendedActionEl = document.getElementById('recommendedAction');
         if (recommendedActionEl) {
+            recommendedActionEl.classList.remove('loading');
             recommendedActionEl.textContent = insights.recommended_action || 'UNKNOWN';
             // Add CSS class for styling based on action
             recommendedActionEl.className = 'metric-value large action-status action-' + 
@@ -345,16 +365,19 @@ class HomeForecastDashboard {
 
         const actionOffTimeEl = document.getElementById('actionOffTime');
         if (actionOffTimeEl) {
+            actionOffTimeEl.classList.remove('loading');
             actionOffTimeEl.textContent = insights.action_off_time || 'N/A';
         }
 
         const nextActionTimeEl = document.getElementById('nextActionTime');
         if (nextActionTimeEl) {
+            nextActionTimeEl.classList.remove('loading');
             nextActionTimeEl.textContent = insights.next_action_time || 'N/A';
         }
 
         const estimatedRuntimeEl = document.getElementById('estimatedRuntime');
         if (estimatedRuntimeEl) {
+            estimatedRuntimeEl.classList.remove('loading');
             estimatedRuntimeEl.textContent = insights.estimated_runtime || 'N/A';
         }
     }
@@ -364,16 +387,22 @@ class HomeForecastDashboard {
         
         const currentSetpointEl = document.getElementById('currentSetpoint');
         if (currentSetpointEl && thermostat_data.target_temperature) {
+            currentSetpointEl.classList.remove('loading');
             currentSetpointEl.textContent = thermostat_data.target_temperature.toFixed(1) + '°F';
+        } else if (currentSetpointEl) {
+            currentSetpointEl.classList.remove('loading');
+            currentSetpointEl.textContent = '-';
         }
 
         const hvacModeEl = document.getElementById('hvacMode');
         if (hvacModeEl) {
+            hvacModeEl.classList.remove('loading');
             hvacModeEl.textContent = (thermostat_data.hvac_mode || 'unknown').toUpperCase();
         }
 
         const hvacActionEl = document.getElementById('hvacAction');
         if (hvacActionEl) {
+            hvacActionEl.classList.remove('loading');
             hvacActionEl.textContent = (thermostat_data.hvac_action || 'unknown').toUpperCase();
         }
     }
@@ -382,32 +411,52 @@ class HomeForecastDashboard {
         // Update version information
         const addonVersionEl = document.getElementById('addonVersion');
         if (addonVersionEl && status.system_info && status.system_info.addon_version) {
+            addonVersionEl.classList.remove('loading');
             addonVersionEl.textContent = status.system_info.addon_version;
+        } else if (addonVersionEl) {
+            addonVersionEl.classList.remove('loading');
+            addonVersionEl.textContent = '-';
         }
 
         // Update timezone information
         const systemTimezoneEl = document.getElementById('systemTimezone');
         if (systemTimezoneEl && status.timezone) {
+            systemTimezoneEl.classList.remove('loading');
             systemTimezoneEl.textContent = status.timezone;
+        } else if (systemTimezoneEl) {
+            systemTimezoneEl.classList.remove('loading');
+            systemTimezoneEl.textContent = '-';
         }
 
         // Update current local time
         const currentLocalTimeEl = document.getElementById('currentLocalTime');
         if (currentLocalTimeEl && status.current_time) {
+            currentLocalTimeEl.classList.remove('loading');
             currentLocalTimeEl.textContent = status.current_time;
+        } else if (currentLocalTimeEl) {
+            currentLocalTimeEl.classList.remove('loading');
+            currentLocalTimeEl.textContent = '-';
         }
 
         // Update Python version
         const pythonVersionEl = document.getElementById('pythonVersion');
         if (pythonVersionEl && status.system_info && status.system_info.python_version) {
+            pythonVersionEl.classList.remove('loading');
             pythonVersionEl.textContent = status.system_info.python_version;
+        } else if (pythonVersionEl) {
+            pythonVersionEl.classList.remove('loading');
+            pythonVersionEl.textContent = '-';
         }
 
         // Update log level
         const logLevelEl = document.getElementById('logLevel');
         if (logLevelEl && status.system_info && status.system_info.log_level) {
             const logLevels = {10: 'DEBUG', 20: 'INFO', 30: 'WARNING', 40: 'ERROR', 50: 'CRITICAL'};
+            logLevelEl.classList.remove('loading');
             logLevelEl.textContent = logLevels[status.system_info.log_level] || 'INFO';
+        } else if (logLevelEl) {
+            logLevelEl.classList.remove('loading');
+            logLevelEl.textContent = '-';
         }
     }
 
@@ -415,8 +464,10 @@ class HomeForecastDashboard {
         // Update thermal model MAE
         const thermalMaeEl = document.getElementById('thermalModelMae');
         if (thermalMaeEl && status.thermal_metrics && status.thermal_metrics.mae !== null) {
+            thermalMaeEl.classList.remove('loading');
             thermalMaeEl.textContent = status.thermal_metrics.mae.toFixed(3) + '°F';
         } else if (thermalMaeEl) {
+            thermalMaeEl.classList.remove('loading');
             thermalMaeEl.textContent = 'N/A';
         }
     }
@@ -431,29 +482,41 @@ class HomeForecastDashboard {
                 'disabled': 'Disabled',
                 'error': 'Error'
             };
+            mlStatusEl.classList.remove('loading');
             mlStatusEl.textContent = statusMap[status.ml_performance.status] || 'Unknown';
+        } else if (mlStatusEl) {
+            mlStatusEl.classList.remove('loading');
+            mlStatusEl.textContent = 'N/A';
         }
 
         // Update ML accuracy (R²)
         const mlAccuracyEl = document.getElementById('mlModelAccuracy');
         if (mlAccuracyEl && status.ml_performance && status.ml_performance.r2 !== null) {
+            mlAccuracyEl.classList.remove('loading');
             mlAccuracyEl.textContent = (status.ml_performance.r2 * 100).toFixed(1) + '%';
         } else if (mlAccuracyEl) {
+            mlAccuracyEl.classList.remove('loading');
             mlAccuracyEl.textContent = 'N/A';
         }
 
         // Update training data points
         const trainingDataEl = document.getElementById('trainingDataPoints');
         if (trainingDataEl && status.ml_performance) {
+            trainingDataEl.classList.remove('loading');
             trainingDataEl.textContent = status.ml_performance.training_samples || '0';
+        } else if (trainingDataEl) {
+            trainingDataEl.classList.remove('loading');
+            trainingDataEl.textContent = '0';
         }
 
         // Update last model update
         const lastUpdateEl = document.getElementById('lastModelUpdate');
         if (lastUpdateEl && status.ml_performance && status.ml_performance.last_update) {
             const updateDate = new Date(status.ml_performance.last_update);
+            lastUpdateEl.classList.remove('loading');
             lastUpdateEl.textContent = updateDate.toLocaleDateString() + ' ' + updateDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: true});
         } else if (lastUpdateEl) {
+            lastUpdateEl.classList.remove('loading');
             lastUpdateEl.textContent = 'Never';
         }
     }
@@ -464,7 +527,11 @@ class HomeForecastDashboard {
         if (comfortRangeEl && status.config) {
             const min = status.config.comfort_min || 62;
             const max = status.config.comfort_max || 80;
+            comfortRangeEl.classList.remove('loading');
             comfortRangeEl.textContent = `${min}°F - ${max}°F`;
+        } else if (comfortRangeEl) {
+            comfortRangeEl.classList.remove('loading');
+            comfortRangeEl.textContent = '-';
         }
     }
 
@@ -1321,15 +1388,28 @@ class HomeForecastDashboard {
 
         // Update database statistics
         if (stats.database) {
-            document.getElementById('measurementCount').textContent = 
-                stats.database.measurements_count.toLocaleString();
-            document.getElementById('forecastCount').textContent = 
-                stats.database.forecasts_count.toLocaleString();
+            const measurementCountEl = document.getElementById('measurementCount');
+            const forecastCountEl = document.getElementById('forecastCount');
+            const dataAgeEl = document.getElementById('dataAge');
             
-            if (stats.database.data_range && stats.database.data_range.start) {
+            if (measurementCountEl) {
+                measurementCountEl.classList.remove('loading');
+                measurementCountEl.textContent = stats.database.measurements_count.toLocaleString();
+            }
+            
+            if (forecastCountEl) {
+                forecastCountEl.classList.remove('loading');
+                forecastCountEl.textContent = stats.database.forecasts_count.toLocaleString();
+            }
+            
+            if (dataAgeEl && stats.database.data_range && stats.database.data_range.start) {
                 const startDate = new Date(stats.database.data_range.start);
                 const days = Math.floor((Date.now() - startDate) / (1000 * 60 * 60 * 24));
-                document.getElementById('dataAge').textContent = days + ' days';
+                dataAgeEl.classList.remove('loading');
+                dataAgeEl.textContent = days + ' days';
+            } else if (dataAgeEl) {
+                dataAgeEl.classList.remove('loading');
+                dataAgeEl.textContent = '0 days';
             }
         }
     }
