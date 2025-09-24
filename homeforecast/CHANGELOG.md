@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2025-09-23
+
+### Major Physics Engine Overhaul - Natural Thermal Behavior Isolation
+- **HVAC Contamination Elimination**: Completely isolated natural thermal predictions from HVAC-trained parameters 
+- **Clean Natural Physics Vector**: Added `_build_clean_natural_vector()` method that zeros out HVAC coefficients for idle predictions
+- **Enhanced Physics Constraints**: Implemented strict thermodynamic rules for no-control scenarios with proper directional validation
+- **Retroactive Physics Correction**: Added automatic cleaning of existing HVAC-contaminated parameters using historical natural-only data
+- **Thermal Time Constant Integration**: Applied building-specific thermal characteristics from enhanced training to improve natural drift rates
+
+### Strict Physics Validation System
+- **Direction Enforcement**: Natural thermal predictions now MUST follow temperature differential (indoor → outdoor approach)
+- **Rate Limiting**: Maximum natural drift rates based on thermal time constants and temperature differences  
+- **Enhanced Training Validation**: Upgraded physics constraints with stricter rules for heating/cooling/natural scenarios
+- **Equilibrium Handling**: Special cases for near-equilibrium conditions with minimal drift allowances
+- **Absolute Bounds**: Temperature-dependent maximum rates preventing unrealistic thermal behavior
+
+### Forecast Engine Improvements
+- **Idle Trajectory Isolation**: Added extra physics validation layer specifically for idle/no-control forecasts
+- **Real-time Physics Corrections**: Dynamic correction of non-physical predictions during trajectory simulation
+- **Enhanced Logging**: Detailed physics violation detection and correction reporting for diagnostics
+- **Control Mode Enforcement**: Guaranteed HVAC state isolation between different prediction scenarios
+
+### Thermal Model Architecture Changes
+- **Parameter Separation**: Natural thermal coefficients now cleanly separated from HVAC-specific parameters
+- **Thermal Characteristics Storage**: Integration of building-specific thermal properties (time constants, max rates)
+- **Automatic Model Correction**: Retroactive correction runs on initialization to clean existing contamination
+- **Physics-Validated Learning**: Enhanced training results application with strict thermal constraint validation
+
+### Bug Fixes - Critical Physics Issues Resolved
+- **Non-Physical Cooling**: Fixed idle predictions showing cooling when outdoor temperature is warmer  
+- **HVAC Parameter Bleeding**: Eliminated heating/cooling coefficients affecting natural thermal predictions
+- **Unrealistic Drift Rates**: Bounded natural temperature change rates to physically realistic values
+- **Direction Violations**: Corrected predictions that moved away from thermal equilibrium direction
+- **Training Data Contamination**: Filtered HVAC-influenced data from natural thermal parameter learning
+
+### Technical Improvements
+- **Backward Compatibility**: All changes preserve existing enhanced training and HVAC prediction functionality
+- **Data Integrity**: Retroactive corrections maintain historical data while cleaning contaminated parameters  
+- **Performance Optimization**: Natural physics constraints applied efficiently without affecting real-time performance
+- **Diagnostic Enhancement**: Comprehensive physics violation logging and correction tracking
+
 ## [2.1.2] - 2025-09-23
 
 ### Enhanced Training System Integration & UI Improvements

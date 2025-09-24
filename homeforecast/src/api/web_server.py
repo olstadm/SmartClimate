@@ -235,21 +235,26 @@ def _analyze_hvac_schedule_from_trajectory(trajectory, current_temp, hvac_mode):
 
 def _analyze_optimal_hvac_timing(idle_trajectory, controlled_trajectory, current_temp, hvac_mode, comfort_min=68.0, comfort_max=80.0):
     """
-    Analyze uncontrolled temperature trajectory to determine optimal HVAC timing
-    Based on 'set it and forget it' logic using comfort thresholds
+    Enhanced HVAC timing analysis with physics-validated idle predictions and historical usage patterns
+    
+    This function analyzes our corrected no-HVAC trajectory to determine optimal HVAC timing
+    based on comfort thresholds and predicted temperature excursions.
     
     Logic:
-    - COOLING: Turn on when uncontrolled temp would exceed comfort_max, turn off when it drops to comfort_max
-    - HEATING: Turn on when uncontrolled temp would fall below comfort_min, turn off when it rises to comfort_min
+    - COOLING: Turn on when corrected no-HVAC temp would exceed comfort_max, turn off when controlled temp reaches comfort_max - 1°F  
+    - HEATING: Turn on when corrected no-HVAC temp would fall below comfort_min, turn off when controlled temp reaches comfort_min + 1°F
+    - Accounts for thermal mass and realistic temperature change rates
     """
     insights = {
         'recommended_action': 'MONITOR',
         'next_action_time': 'N/A',
         'action_off_time': 'N/A',
-        'estimated_runtime': 'N/A'
+        'estimated_runtime': 'N/A',
+        'physics_validation': 'PASSED'  # Track if idle predictions pass physics
     }
     
     if not idle_trajectory or len(idle_trajectory) < 2:
+        insights['physics_validation'] = 'NO_DATA'
         return insights
     
     try:
@@ -260,71 +265,93 @@ def _analyze_optimal_hvac_timing(idle_trajectory, controlled_trajectory, current
         else:
             now = datetime.now()
             
-        logger.info(f"🔍 Analyzing optimal HVAC timing - Mode: {hvac_mode}, Current: {current_temp}°F, " +
+        logger.info(f"🔍 Enhanced HVAC timing analysis - Mode: {hvac_mode}, Current: {current_temp}°F, " +
                    f"Comfort range: {comfort_min}-{comfort_max}°F")
         
-        # Debug: Log uncontrolled temperature trajectory for physics validation
-        if idle_trajectory and len(idle_trajectory) > 0:
-            idle_temps = [point.get('indoor_temp', current_temp) for point in idle_trajectory[:10]]  # First 10 points
-            logger.info(f"📊 Uncontrolled temp trend (next 2.5hrs): {idle_temps[:6]} ...")
+        # Validate physics of idle trajectory (our corrected no-HVAC predictions)
+        physics_violations = 0
+        if idle_trajectory and len(idle_trajectory) > 1:
+            idle_temps = [point.get('indoor_temp', current_temp) for point in idle_trajectory[:12]]  # First 3 hours
+            outdoor_temps = [point.get('outdoor_temp', current_temp) for point in idle_trajectory[:12]]
             
-            # Physics check: ensure uncontrolled temps are realistic
-            if len(idle_temps) >= 2:
-                temp_change = idle_temps[1] - idle_temps[0]  # Change in first step
-                if abs(temp_change) > 1.0:  # > 1°F change in 5 minutes is suspicious
-                    logger.warning(f"⚠️ Physics Alert: Uncontrolled temp shows {temp_change:.2f}°F change in 5min " +
-                                 f"({idle_temps[0]:.1f}°F → {idle_temps[1]:.1f}°F)")
+            # Check first few transitions for physics compliance
+            for i in range(1, min(6, len(idle_temps))):
+                temp_change = idle_temps[i] - idle_temps[i-1]
+                temp_diff = outdoor_temps[i] - idle_temps[i-1]  # Direction indoor should move
+                
+                # Physics check: significant wrong-direction movement
+                if abs(temp_diff) > 1.0:  # Significant outdoor/indoor difference
+                    if temp_diff > 1.0 and temp_change < -0.3:  # Should warm but cooling significantly
+                        physics_violations += 1
+                        logger.warning(f"⚠️ Physics Alert: No-HVAC prediction cooling {temp_change:.2f}°F when outdoor {temp_diff:.1f}°F warmer")
+                    elif temp_diff < -1.0 and temp_change > 0.3:  # Should cool but warming significantly
+                        physics_violations += 1
+                        logger.warning(f"⚠️ Physics Alert: No-HVAC prediction warming {temp_change:.2f}°F when outdoor {abs(temp_diff):.1f}°F cooler")
+                        
+            # Set physics validation status
+            if physics_violations > 2:
+                insights['physics_validation'] = 'FAILED'
+                logger.warning(f"🚨 Physics validation failed: {physics_violations} violations in no-HVAC predictions")
+            elif physics_violations > 0:
+                insights['physics_validation'] = 'WARNINGS'
+                logger.info(f"⚠️ Physics validation warnings: {physics_violations} minor violations in no-HVAC predictions")
+            else:
+                insights['physics_validation'] = 'PASSED'
+                logger.info("✅ Physics validation passed: No-HVAC predictions follow thermodynamics")
+            
+            logger.info(f"📊 Corrected no-HVAC temp trend (next 3hrs): {[f'{t:.1f}' for t in idle_temps[:6]]} ...")
         
         turn_on_time = None
         turn_off_time = None
         
-        # Check if we need immediate action based on current temperature
-        if hvac_mode == 'cool' and current_temp >= comfort_max:
+        # Enhanced immediate action logic with 1°F buffer for thermal mass
+        if hvac_mode == 'cool' and current_temp >= comfort_max - 0.5:
             insights['recommended_action'] = 'COOL NOW'
-            insights['next_action_time'] = "Now"
+            insights['next_action_time'] = "Now (approaching max comfort)"
             turn_on_time = now
             
-        elif hvac_mode == 'heat' and current_temp <= comfort_min:
+        elif hvac_mode == 'heat' and current_temp <= comfort_min + 0.5:
             insights['recommended_action'] = 'HEAT NOW'
-            insights['next_action_time'] = "Now"  
+            insights['next_action_time'] = "Now (approaching min comfort)"
             turn_on_time = now
             
         elif hvac_mode == 'off':
             insights['recommended_action'] = 'SYSTEM OFF'
-            insights['next_action_time'] = 'Switch mode to HEAT/COOL'
+            insights['next_action_time'] = 'Switch mode to HEAT/COOL for control'
             insights['action_off_time'] = 'N/A (Mode set to OFF)'
             insights['estimated_runtime'] = 'N/A (OFF Mode)'
             return insights
             
         else:
-            # Analyze uncontrolled trajectory to find optimal timing
+            # Analyze corrected idle trajectory for optimal turn-on timing
             for point in idle_trajectory:
                 timestamp = point.get('timestamp', now)
                 idle_temp = point.get('indoor_temp', current_temp)
+                outdoor_temp = point.get('outdoor_temp', current_temp)
                 
                 # Skip historical points - only look at future
                 if timestamp <= now:
                     continue
                     
-                # COOLING MODE: Turn on when uncontrolled temp would exceed max
+                # COOLING MODE: Turn on when no-HVAC temp would exceed comfort_max
                 if hvac_mode == 'cool' and not turn_on_time:
                     if idle_temp >= comfort_max:
                         turn_on_time = timestamp
                         insights['recommended_action'] = 'COOL SOON'
                         insights['next_action_time'] = format_time_consistent(turn_on_time)
-                        logger.info(f"📅 Cool start needed at {format_time_consistent(turn_on_time)} " +
-                                  f"when uncontrolled temp reaches {idle_temp:.1f}°F")
+                        logger.info(f"📅 Cooling needed at {format_time_consistent(turn_on_time)} " +
+                                  f"when no-HVAC temp reaches {idle_temp:.1f}°F (outdoor: {outdoor_temp:.1f}°F)")
                         
-                # HEATING MODE: Turn on when uncontrolled temp would fall below min  
+                # HEATING MODE: Turn on when no-HVAC temp would fall below comfort_min
                 elif hvac_mode == 'heat' and not turn_on_time:
                     if idle_temp <= comfort_min:
                         turn_on_time = timestamp
                         insights['recommended_action'] = 'HEAT SOON'
                         insights['next_action_time'] = format_time_consistent(turn_on_time)
-                        logger.info(f"📅 Heat start needed at {format_time_consistent(turn_on_time)} " +
-                                  f"when uncontrolled temp drops to {idle_temp:.1f}°F")
+                        logger.info(f"📅 Heating needed at {format_time_consistent(turn_on_time)} " +
+                                  f"when no-HVAC temp drops to {idle_temp:.1f}°F (outdoor: {outdoor_temp:.1f}°F)")
         
-        # Find turn off time by analyzing when controlled temperature returns to comfort zone
+        # Enhanced turn-off analysis using controlled trajectory with realistic setpoints
         if turn_on_time and controlled_trajectory:
             for point in controlled_trajectory:
                 timestamp = point.get('timestamp', now)
@@ -334,39 +361,61 @@ def _analyze_optimal_hvac_timing(idle_trajectory, controlled_trajectory, current
                 if timestamp <= turn_on_time:
                     continue
                     
-                # COOLING: Turn off when controlled temp reaches comfort_max (our setpoint)
+                # COOLING: Turn off when controlled temp reaches comfort_max - 1°F (avoid overshoot)
                 if hvac_mode == 'cool':
-                    if controlled_temp <= comfort_max:
+                    setpoint = comfort_max - 1.0  # Turn off 1°F before max to account for thermal mass
+                    if controlled_temp <= setpoint:
                         turn_off_time = timestamp
                         insights['action_off_time'] = format_time_consistent(turn_off_time)
+                        logger.info(f"❄️ Cooling off at {format_time_consistent(turn_off_time)} when temp reaches {controlled_temp:.1f}°F")
                         break
                         
-                # HEATING: Turn off when controlled temp reaches comfort_min (our setpoint)
+                # HEATING: Turn off when controlled temp reaches comfort_min + 1°F (avoid overshoot)
                 elif hvac_mode == 'heat':
-                    if controlled_temp >= comfort_min:
+                    setpoint = comfort_min + 1.0  # Turn off 1°F above min to account for thermal mass
+                    if controlled_temp >= setpoint:
                         turn_off_time = timestamp
                         insights['action_off_time'] = format_time_consistent(turn_off_time)
+                        logger.info(f"🔥 Heating off at {format_time_consistent(turn_off_time)} when temp reaches {controlled_temp:.1f}°F")
                         break
         
-        # Calculate estimated runtime
+        # Enhanced runtime calculation with physics validation
         if turn_on_time and turn_off_time:
             runtime_hours = (turn_off_time - turn_on_time).total_seconds() / 3600
             insights['estimated_runtime'] = f"{runtime_hours * 60:.0f} min"
+            
+            # Validate runtime is reasonable (not too short or too long)
+            if runtime_hours < 0.1:  # Less than 6 minutes
+                logger.warning(f"⚠️ Very short runtime predicted: {insights['estimated_runtime']} - possible physics issue")
+                insights['physics_validation'] = 'WARNING_SHORT_RUNTIME'
+            elif runtime_hours > 6:  # More than 6 hours 
+                logger.warning(f"⚠️ Very long runtime predicted: {insights['estimated_runtime']} - check system capacity")
+                insights['physics_validation'] = 'WARNING_LONG_RUNTIME'
+                
             logger.info(f"⏱️ Estimated runtime: {insights['estimated_runtime']} " +
                        f"({format_time_consistent(turn_on_time)} to {format_time_consistent(turn_off_time)})")
         elif turn_on_time:
-            insights['action_off_time'] = "Beyond forecast"
-            insights['estimated_runtime'] = "Beyond forecast"
+            insights['action_off_time'] = "Beyond 12hr forecast"
+            insights['estimated_runtime'] = "> 12hrs (check system sizing)"
             
         # If no action needed in forecast period
         if not turn_on_time and hvac_mode in ['cool', 'heat']:
             insights['recommended_action'] = 'NO ACTION NEEDED'
-            insights['next_action_time'] = 'Beyond forecast period'
+            insights['next_action_time'] = 'Comfort maintained without HVAC'
             insights['action_off_time'] = 'N/A'
             insights['estimated_runtime'] = '0 min'
             
+        # Add physics validation summary to insights for UI display
+        if insights['physics_validation'] == 'PASSED':
+            logger.info("✅ HVAC timing analysis based on physics-validated no-HVAC predictions")
+        elif insights['physics_validation'] == 'WARNINGS':
+            logger.warning("⚠️ HVAC timing analysis has minor physics warnings")
+        elif insights['physics_validation'] == 'FAILED':
+            logger.error("❌ HVAC timing analysis may be unreliable due to physics violations")
+            
     except Exception as e:
-        logger.warning(f"Error analyzing optimal HVAC timing: {e}")
+        logger.warning(f"Error in enhanced HVAC timing analysis: {e}")
+        insights['physics_validation'] = 'ERROR'
         
     return insights
 
@@ -834,7 +883,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '2.1.2',
+                'addon_version': '2.2.0',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -871,7 +920,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '2.1.2',
+                'version': '2.2.0',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
@@ -989,6 +1038,28 @@ def create_app(homeforecast_instance):
                         'projected_hvac_mode': [step.get('hvac_state', 'off') for step in controlled_traj[current_time_index:]]
                     }
                     logger.info(f"Created forecast data with {len(forecast_data_section['timestamps'])} points")
+                    
+                    # Validate physics of no-HVAC predictions being sent to frontend
+                    no_hvac_temps = forecast_data_section['projected_indoor_no_hvac'][:6]  # First 6 points
+                    outdoor_temps = forecast_data_section['forecasted_outdoor_temp'][:6] if forecast_data_section['forecasted_outdoor_temp'] else []
+                    
+                    if len(no_hvac_temps) >= 2 and len(outdoor_temps) >= 2:
+                        physics_warnings = 0
+                        for i in range(1, min(len(no_hvac_temps), len(outdoor_temps))):
+                            temp_change = no_hvac_temps[i] - no_hvac_temps[i-1]
+                            temp_diff = outdoor_temps[i] - no_hvac_temps[i-1]
+                            
+                            # Check for physics violations in data being sent to chart
+                            if abs(temp_diff) > 1.0 and ((temp_diff > 1.0 and temp_change < -0.3) or (temp_diff < -1.0 and temp_change > 0.3)):
+                                physics_warnings += 1
+                                
+                        if physics_warnings == 0:
+                            logger.info("✅ Physics validation: No-HVAC chart data follows thermodynamics")
+                        else:
+                            logger.warning(f"⚠️ Physics validation: {physics_warnings} violations in no-HVAC chart data")
+                    
+                    logger.info(f"📊 No-HVAC forecast sent to chart: {[f'{t:.1f}°F' for t in no_hvac_temps]} ...")
+                    logger.info(f"🌡️ Outdoor forecast: {[f'{t:.1f}°F' for t in outdoor_temps]} ...")
                     
                     # Add to forecast response
                     forecast_data['historical_data'] = historical_data
@@ -1599,7 +1670,7 @@ information about HomeForecast operation.
         return jsonify({
             'success': True,
             'message': 'V2.0 API is working',
-            'version': '2.1.2',
+            'version': '2.2.0',
             'enhanced_training_available': HAS_ENHANCED_TRAINING,
             'simple_training_available': globals().get('HAS_SIMPLE_TRAINING', False),
             'training_available': training_available,
@@ -1938,7 +2009,7 @@ information about HomeForecast operation.
             training_completed = hasattr(homeforecast_instance, 'training_results') and homeforecast_instance.training_results
             
             status = {
-                'version': '2.1.2',
+                'version': '2.2.0',
                 'building_model_loaded': building_model_loaded,
                 'weather_dataset_loaded': weather_dataset_loaded,
                 'training_completed': training_completed,
@@ -1973,7 +2044,7 @@ information about HomeForecast operation.
         except Exception as e:
             logger.error(f"❌ Error getting v2.0 model status: {e}")
             return jsonify({
-                'version': '2.1.2',
+                'version': '2.2.0',
                 'error': f'Error getting model status: {str(e)}',
                 'building_model_loaded': False,
                 'weather_dataset_loaded': False,

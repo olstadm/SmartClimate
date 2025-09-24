@@ -1,5 +1,5 @@
 """
-Enhanced Training System for HomeForecast v2.1.2
+Enhanced Training System for HomeForecast v2.2.0
 Integrates DOE building models and EPW weather data for accurate thermal predictions
 """
 import logging
@@ -130,14 +130,14 @@ class EnhancedTrainingSystem:
         import time
         training_start_time = time.time()
         
-        logger.info("🏠 HomeForecast Enhanced Training System v2.1.2")
+        logger.info("🏠 HomeForecast Enhanced Training System v2.2.0")
         logger.info(f"📋 Building: {self.building_model.get('building_type', 'Unknown') if self.building_model else 'No model'}")
         logger.info(f"🌤️  Weather: {self.weather_dataset.get('location', {}).get('city', 'Unknown') if self.weather_dataset else 'No dataset'}")
         logger.info(f"⏱️  Training Duration: {training_duration_hours} hours")
         logger.info("=" * 60)
         
         # Also print to console to ensure visibility
-        print("🏠 HomeForecast Enhanced Training System v2.1.2")
+        print("🏠 HomeForecast Enhanced Training System v2.2.0")
         print(f"📋 Building: {self.building_model.get('building_type', 'Unknown') if self.building_model else 'No model'}")
         print(f"🌤️  Weather: {self.weather_dataset.get('location', {}).get('city', 'Unknown') if self.weather_dataset else 'No dataset'}")
         print(f"⏱️  Training Duration: {training_duration_hours} hours")
@@ -469,7 +469,7 @@ class EnhancedTrainingSystem:
     def _validate_physics_constraints(self, temp_change: float, indoor_temp: float, 
                                     outdoor_temp: float, hvac_mode: str) -> bool:
         """
-        Validate that temperature change follows physics constraints
+        Enhanced physics validation with stricter natural thermal constraints
         
         Args:
             temp_change: Predicted temperature change (°F/hr)
@@ -481,28 +481,54 @@ class EnhancedTrainingSystem:
             True if physics constraints are satisfied
         """
         # Maximum realistic temperature change rates
-        if abs(temp_change) > 10.0:  # °F/hr
+        if abs(temp_change) > 12.0:  # °F/hr - increased from 10 for HVAC scenarios
             return False
             
         # Temperature differential constraints
         temp_diff = outdoor_temp - indoor_temp
         
         if hvac_mode == 'off':
-            # Natural heating/cooling should follow temperature differential direction
-            if temp_diff > 0 and temp_change < -0.5:  # Should be warming, but cooling too fast
+            # STRICT natural thermal physics for idle/off scenarios
+            
+            # Rule 1: Direction must follow temperature differential
+            if abs(temp_diff) > 0.5:  # Significant temperature difference
+                if temp_diff > 0.5 and temp_change < -0.1:
+                    # Outdoor warmer but predicted cooling - VIOLATION
+                    return False
+                elif temp_diff < -0.5 and temp_change > 0.1:
+                    # Outdoor cooler but predicted warming - VIOLATION  
+                    return False
+                    
+            # Rule 2: Rate must be realistic for natural thermal response
+            # Natural thermal approach follows exponential decay: rate ∝ temp_diff
+            max_natural_rate = min(3.0, abs(temp_diff) * 0.5)  # Max 3°F/hr or 50% of difference
+            if abs(temp_change) > max_natural_rate:
                 return False
-            if temp_diff < 0 and temp_change > 0.5:   # Should be cooling, but warming too fast
+                
+            # Rule 3: Near equilibrium should have minimal change
+            if abs(temp_diff) < 1.0 and abs(temp_change) > 0.3:
                 return False
                 
         elif hvac_mode == 'heat':
-            # Should always be heating (positive change) or at least not cooling fast
-            if temp_change < -1.0:
+            # Enhanced heating validation
+            if temp_change < -1.0:  # Heating shouldn't cause significant cooling
+                return False
+            if temp_change > 10.0:  # Heating rate should be reasonable
                 return False
                 
         elif hvac_mode == 'cool':
-            # Should always be cooling (negative change) or at least not heating fast
-            if temp_change > 1.0:
+            # Enhanced cooling validation  
+            if temp_change > 1.0:  # Cooling shouldn't cause significant warming
                 return False
+            if temp_change < -10.0:  # Cooling rate should be reasonable
+                return False
+                
+        # Absolute temperature bounds check
+        new_temp = indoor_temp + temp_change
+        if new_temp < 40.0 or new_temp > 110.0:  # Reasonable indoor temp bounds
+            return False
+            
+        return True
                 
         return True
     
@@ -514,7 +540,7 @@ class EnhancedTrainingSystem:
             
         output_data = {
             'timestamp': datetime.now().isoformat(),
-            'version': '2.1.2',
+            'version': '2.2.0',
             'building_model': self.building_model,
             'weather_dataset_info': {
                 'location': self.weather_dataset.get('location', {}),

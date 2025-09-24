@@ -80,12 +80,40 @@ class ComfortAnalyzer:
                 logger.info(f"  HVAC mode: {first_point.get('hvac_mode', 'N/A')}")
                 logger.info(f"  Timestamp: {first_point.get('timestamp', 'N/A')}")
             
-            # Get trajectories with fallback for missing keys
+            # Get trajectories with physics validation
             idle_traj = forecast_result.get('idle_trajectory', [])
             controlled_traj = forecast_result.get('controlled_trajectory', [])
             current_traj = forecast_result.get('current_trajectory', idle_traj)  # Fallback to idle_traj
             
             logger.info(f"Trajectory data points - Idle: {len(idle_traj)}, Controlled: {len(controlled_traj)}, Current: {len(current_traj)}")
+            
+            # Validate physics of idle trajectory for reliable comfort analysis
+            if len(idle_traj) >= 3:
+                physics_violations = 0
+                for i in range(1, min(4, len(idle_traj))):
+                    prev_point = idle_traj[i-1]
+                    curr_point = idle_traj[i]
+                    
+                    prev_temp = prev_point.get('indoor_temp', 70)
+                    curr_temp = curr_point.get('indoor_temp', 70)
+                    outdoor_temp = curr_point.get('outdoor_temp', 70)
+                    
+                    temp_change = curr_temp - prev_temp
+                    temp_diff = outdoor_temp - prev_temp  # Direction indoor should naturally move
+                    
+                    # Check for physics violations in no-HVAC trajectory used for comfort analysis
+                    if abs(temp_diff) > 1.0:  # Significant temperature difference
+                        if temp_diff > 1.0 and temp_change < -0.3:  # Should warm but cooling significantly
+                            physics_violations += 1
+                            logger.warning(f"⚠️ Comfort analysis physics issue: Indoor cooling {temp_change:.2f}°F when outdoor {temp_diff:.1f}°F warmer")
+                        elif temp_diff < -1.0 and temp_change > 0.3:  # Should cool but warming significantly
+                            physics_violations += 1
+                            logger.warning(f"⚠️ Comfort analysis physics issue: Indoor warming {temp_change:.2f}°F when outdoor {abs(temp_diff):.1f}°F cooler")
+                            
+                if physics_violations == 0:
+                    logger.info("✅ Comfort analysis: Using physics-validated no-HVAC trajectory")
+                else:
+                    logger.warning(f"⚠️ Comfort analysis: {physics_violations} physics violations in idle trajectory - results may be unreliable")
             
             # If no trajectories are available, return empty analysis
             if not idle_traj:

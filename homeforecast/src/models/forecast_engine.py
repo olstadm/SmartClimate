@@ -432,9 +432,10 @@ class ForecastEngine:
             # Debug: Log first few temperature transitions for continuity checking
             if i < 3 and control_mode == 'idle':
                 logger.info(f"🔍 Idle trajectory step {i}: T_in={state['indoor_temp']:.2f}°F, T_out={outdoor['outdoor_temp']:.2f}°F")
-            # Determine HVAC state based on control mode
+                
+            # Determine HVAC state based on control mode - CRITICAL for physics isolation
             if control_mode == 'idle':
-                state['hvac_state'] = 'off'
+                state['hvac_state'] = 'off'  # FORCE off state for idle predictions
             elif control_mode == 'current':
                 state['hvac_state'] = fixed_hvac_state or 'off'
             elif control_mode == 'smart':
@@ -444,15 +445,38 @@ class ForecastEngine:
                     outdoor['outdoor_temp']
                 )
                 
-            # Calculate temperature change rate
+            # Calculate temperature change rate with enhanced physics isolation
             dT_dt = self.thermal_model.predict_temperature_change(
                 state['indoor_temp'],
                 outdoor['outdoor_temp'],
                 state['indoor_humidity'],
                 outdoor['outdoor_humidity'],
-                state['hvac_state'],
+                state['hvac_state'],  # This will be 'off' for idle mode
                 outdoor['solar_irradiance']
             )
+            
+            # Additional physics validation for idle trajectories
+            if control_mode == 'idle':
+                temp_diff = outdoor['outdoor_temp'] - state['indoor_temp']
+                
+                # Validate direction follows physics for no-HVAC scenario
+                if temp_diff > 0.5 and dT_dt < 0:
+                    logger.warning(f"🔬 Idle physics fix: Predicted cooling when outdoor warmer. " + 
+                                 f"T_diff={temp_diff:.1f}°F, changing dT_dt from {dT_dt:.3f} to 0.1°F/hr")
+                    dT_dt = 0.1  # Minimum warming when outdoor is warmer
+                elif temp_diff < -0.5 and dT_dt > 0:
+                    logger.warning(f"🔬 Idle physics fix: Predicted warming when outdoor cooler. " +
+                                 f"T_diff={temp_diff:.1f}°F, changing dT_dt from {dT_dt:.3f} to -0.1°F/hr")
+                    dT_dt = -0.1  # Minimum cooling when outdoor is cooler
+                    
+                # Cap natural drift rate more aggressively
+                max_natural_drift = min(2.0, abs(temp_diff) * 0.4)  # Max 2°F/hr or 40% of temp difference
+                if dT_dt > max_natural_drift:
+                    logger.debug(f"🔬 Idle rate cap: Limited warming from {dT_dt:.3f} to {max_natural_drift:.3f}°F/hr")
+                    dT_dt = max_natural_drift
+                elif dT_dt < -max_natural_drift:
+                    logger.debug(f"🔬 Idle rate cap: Limited cooling from {dT_dt:.3f} to {-max_natural_drift:.3f}°F/hr")
+                    dT_dt = -max_natural_drift
             
             # Update temperature with guardrails
             dt_hours = self.time_step_minutes / 60.0

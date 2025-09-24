@@ -124,6 +124,9 @@ class ThermalModel:
         # Load saved parameters if available
         await self.load_parameters()
         
+        # Apply retroactive physics correction to clean any existing HVAC contamination
+        await self.retroactive_physics_correction()
+        
         # Initialize ML corrector if enabled
         if self.ml_enabled:
             logger.info("🤖 Initializing ML corrector...")
@@ -227,6 +230,25 @@ class ThermalModel:
             t_out - t_in,    # Temperature difference
             i_heat,          # Heating indicator
             i_cool,          # Cooling indicator  
+            1.0,             # Constant (for baseline drift)
+            h_diff,          # Enthalpy difference
+            solar / 1000.0   # Solar irradiance (normalized)
+        ])
+        
+        return phi
+        
+    def _build_clean_natural_vector(self, t_in: float, t_out: float, 
+                                   h_in: float, h_out: float, solar: float) -> np.ndarray:
+        """Build feature vector for natural (no-HVAC) thermal predictions"""
+        # Calculate enthalpy difference (simplified)
+        h_diff = self._calculate_enthalpy_diff(t_out, h_out, t_in, h_in)
+        
+        # Clean natural physics vector: [T_out - T_in, 0, 0, 1, h_diff, solar]
+        # Zero out HVAC coefficients for pure natural thermal response
+        phi = np.array([
+            t_out - t_in,    # Temperature difference (primary driver)
+            0.0,             # NO heating influence
+            0.0,             # NO cooling influence  
             1.0,             # Constant (for baseline drift)
             h_diff,          # Enthalpy difference
             solar / 1000.0   # Solar irradiance (normalized)
@@ -532,8 +554,19 @@ class ThermalModel:
         Returns:
             dT/dt in °C/hour
         """
-        phi = self._build_feature_vector(t_in, t_out, h_in, h_out, hvac_state, solar)
-        dT_dt = np.dot(phi, self.rls.theta)
+        # Build clean feature vector for no-HVAC predictions
+        if hvac_state in ['off', 'idle']:
+            # For idle predictions, use ONLY natural thermal physics - zero out HVAC parameters
+            phi = self._build_clean_natural_vector(t_in, t_out, h_in, h_out, solar)
+            # Use only natural parameters: [temp_diff, 0, 0, baseline, enthalpy, solar]
+            clean_theta = self.rls.theta.copy()
+            clean_theta[1] = 0.0  # Zero heating coefficient
+            clean_theta[2] = 0.0  # Zero cooling coefficient  
+            dT_dt = np.dot(phi, clean_theta)
+        else:
+            # Normal prediction with all parameters for HVAC scenarios
+            phi = self._build_feature_vector(t_in, t_out, h_in, h_out, hvac_state, solar)
+            dT_dt = np.dot(phi, self.rls.theta)
         
         # Apply ML correction if available (DISABLED in v2.0 for physics accuracy)
         if self.ml_corrector and self.ml_enabled and False:  # Temporarily disabled
@@ -557,42 +590,81 @@ class ThermalModel:
             
             dT_dt += correction
         
-        # Apply physics-based constraints to temperature change rate
+        # Enhanced physics-based constraints for temperature change rate
         if hvac_state in ['off', 'idle']:
-            # No HVAC: Physics-based natural drift constraints
+            # STRICT natural physics constraints for idle/off mode
             temp_diff = t_out - t_in
             
-            # Natural drift should move towards outdoor temperature
-            if temp_diff > 0:
-                # Outdoor warmer: indoor should warm up (positive dT_dt)
-                dT_dt = max(0, dT_dt)  # Prevent cooling when outdoor is warmer
-                max_natural_rate = min(5.0, abs(temp_diff) * 0.3)  # Proportional to temp difference
-                dT_dt = min(dT_dt, max_natural_rate)
-            elif temp_diff < 0:
-                # Outdoor cooler: indoor should cool down (negative dT_dt)
-                dT_dt = min(0, dT_dt)  # Prevent heating when outdoor is cooler
-                max_natural_rate = min(5.0, abs(temp_diff) * 0.3)
-                dT_dt = max(dT_dt, -max_natural_rate)
+            # Calculate maximum natural drift rate based on building physics
+            # Use thermal time constant if available from enhanced training
+            thermal_time_constant = getattr(self, 'thermal_time_constant_hours', 8.0)  # Default 8 hours
+            max_natural_approach_rate = abs(temp_diff) / thermal_time_constant  # Approach at 1/τ rate
+            
+            # Physics Rule 1: Direction must follow temperature differential
+            if temp_diff > 0.1:
+                # Outdoor warmer: indoor MUST warm up (positive dT_dt only)
+                if dT_dt < 0:
+                    logger.warning(f"🔬 Physics violation corrected: Predicted cooling ({dT_dt:.3f}°F/hr) when outdoor warmer ({temp_diff:.1f}°F)")
+                    dT_dt = 0.1  # Minimum warming rate
+                else:
+                    # Limit warming to natural approach rate
+                    max_rate = min(max_natural_approach_rate, 2.0)  # Max 2°F/hr natural warming
+                    dT_dt = min(dT_dt, max_rate)
+                    
+            elif temp_diff < -0.1:
+                # Outdoor cooler: indoor MUST cool down (negative dT_dt only)
+                if dT_dt > 0:
+                    logger.warning(f"🔬 Physics violation corrected: Predicted warming ({dT_dt:.3f}°F/hr) when outdoor cooler ({temp_diff:.1f}°F)")
+                    dT_dt = -0.1  # Minimum cooling rate
+                else:
+                    # Limit cooling to natural approach rate
+                    max_rate = min(max_natural_approach_rate, 2.0)  # Max 2°F/hr natural cooling
+                    dT_dt = max(dT_dt, -max_rate)
+                    
             else:
-                # Temperatures equal: minimal change
-                max_natural_rate = 0.5  # Very slow drift at equilibrium
-                dT_dt = max(-max_natural_rate, min(max_natural_rate, dT_dt))
+                # Temperatures very close: minimal drift allowed
+                max_equilibrium_drift = 0.2  # Very slow drift near equilibrium
+                dT_dt = max(-max_equilibrium_drift, min(max_equilibrium_drift, dT_dt))
+                
+            # Absolute bounds for natural drift
+            absolute_natural_max = 3.0  # °F/hour absolute maximum for natural drift
+            dT_dt = max(-absolute_natural_max, min(absolute_natural_max, dT_dt))
                 
             # Log physics corrections for uncontrolled scenarios
-            if len(self.parameter_history) < 50:  # Early learning stage
-                logger.info(f"🔬 Physics constraint (no HVAC): T_in={t_in:.1f}°F, T_out={t_out:.1f}°F, " +
-                          f"dT_dt={dT_dt:.3f}°F/hr (diff={temp_diff:.1f}°F)")
+            if abs(dT_dt) > 0.5 or len(self.parameter_history) < 50:  # Log significant changes or early learning
+                logger.info(f"🔬 Natural physics (no HVAC): T_in={t_in:.1f}°F, T_out={t_out:.1f}°F, " +
+                          f"dT_dt={dT_dt:.3f}°F/hr (diff={temp_diff:.1f}°F, τ={thermal_time_constant:.1f}h)")
         else:
             # HVAC active: Allow stronger heating/cooling but still bounded
-            max_hvac_rate = 15.0  # °F/hour for active HVAC
+            temp_diff = t_out - t_in
+            
+            # Enhanced HVAC bounds based on system capabilities
+            if hvac_state == 'heat':
+                # Heating should always warm, but limited by capacity
+                max_heating_rate = getattr(self, 'max_heating_rate', 8.0)  # °F/hour
+                if dT_dt < 0:
+                    logger.warning(f"🔬 HVAC Physics violation: Heating predicted cooling ({dT_dt:.3f}°F/hr)")
+                    dT_dt = 0.5  # Minimum heating effectiveness
+                dT_dt = min(dT_dt, max_heating_rate)
+                
+            elif hvac_state == 'cool':
+                # Cooling should always cool, but limited by capacity
+                max_cooling_rate = getattr(self, 'max_cooling_rate', -8.0)  # °F/hour (negative)
+                if dT_dt > 0:
+                    logger.warning(f"🔬 HVAC Physics violation: Cooling predicted warming ({dT_dt:.3f}°F/hr)")
+                    dT_dt = -0.5  # Minimum cooling effectiveness
+                dT_dt = max(dT_dt, max_cooling_rate)
+            
+            # Overall HVAC bounds
+            max_hvac_rate = 12.0  # °F/hour for active HVAC
             dT_dt = max(-max_hvac_rate, min(max_hvac_rate, dT_dt))
         
-        # Absolute maximum bounds
-        absolute_max = 20.0  # °F/hour absolute maximum
+        # Absolute maximum bounds for all scenarios
+        absolute_max = 15.0  # °F/hour absolute maximum
         dT_dt = max(-absolute_max, min(absolute_max, dT_dt))
         
         # Log extreme values for debugging
-        if abs(dT_dt) > 10.0:
+        if abs(dT_dt) > 5.0:
             logger.debug(f"High temperature change rate: {dT_dt:.2f}°F/hr (T_in: {t_in:.1f}°F, T_out: {t_out:.1f}°F, HVAC: {hvac_state})")
             
         return dT_dt
@@ -719,10 +791,158 @@ class ThermalModel:
             # Save the enhanced parameters
             await self.save_parameters()
             
+            # Store enhanced training characteristics for better physics
+            if 'building_characteristics' in training_results:
+                chars = training_results['building_characteristics']
+                self.thermal_time_constant_hours = chars.get('thermal_time_constant_hours', 8.0)
+                self.max_heating_rate = chars.get('suggested_heating_rate_F_per_hr', 8.0)
+                self.max_cooling_rate = -chars.get('suggested_cooling_rate_F_per_hr', 8.0)
+                
+                logger.info(f"   Applied thermal characteristics:")
+                logger.info(f"     Thermal time constant: {self.thermal_time_constant_hours:.1f} hours")
+                logger.info(f"     Max heating rate: {self.max_heating_rate:.1f} °F/hr") 
+                logger.info(f"     Max cooling rate: {self.max_cooling_rate:.1f} °F/hr")
+            
             logger.info("✅ Enhanced training results successfully applied to thermal model")
+            logger.info("🔬 Natural physics predictions will now use strict thermal constraints")
             
         except Exception as e:
             logger.error(f"❌ Error applying enhanced training results: {e}", exc_info=True)
+            
+    async def retroactive_physics_correction(self):
+        """
+        Apply retroactive physics corrections to clean existing parameter contamination
+        
+        This method retrains the thermal model using only natural (no-HVAC) data points
+        from historical data to eliminate HVAC influence on idle predictions.
+        """
+        try:
+            logger.info("🔧 Starting retroactive physics correction...")
+            logger.info("   Purpose: Remove HVAC contamination from natural thermal parameters")
+            
+            # Get historical data for retraining
+            historical_data = await self.data_store.get_recent_data(hours=168)  # Last week
+            if not historical_data or len(historical_data) < 20:
+                logger.warning("⚠️ Insufficient historical data for retroactive correction")
+                return
+                
+            logger.info(f"   Available historical data: {len(historical_data)} points")
+            
+            # Filter for natural thermal data only (HVAC off/idle)
+            natural_data = []
+            hvac_data = []
+            
+            for point in historical_data:
+                hvac_state = point.get('hvac_state', 'unknown')
+                if hvac_state in ['off', 'idle', 'unknown']:
+                    natural_data.append(point)
+                else:
+                    hvac_data.append(point)
+                    
+            logger.info(f"   Natural thermal points: {len(natural_data)}")
+            logger.info(f"   HVAC-active points: {len(hvac_data)} (excluded)")
+            
+            if len(natural_data) < 10:
+                logger.warning("⚠️ Insufficient natural thermal data for correction")
+                return
+                
+            # Create a separate RLS instance for natural parameters only
+            natural_rls = RecursiveLeastSquares(n_params=6, forgetting_factor=0.98)
+            
+            # Train only on natural thermal data with strict physics validation
+            valid_natural_updates = 0
+            physics_violations = 0
+            
+            for point in natural_data:
+                try:
+                    # Extract data
+                    t_in = point.get('indoor_temp')
+                    t_out = point.get('outdoor_temp') 
+                    h_in = point.get('indoor_humidity', 50.0)
+                    h_out = point.get('outdoor_humidity', 50.0)
+                    solar = point.get('solar_irradiance', 0.0)
+                    
+                    if None in [t_in, t_out]:
+                        continue
+                        
+                    # Calculate actual temperature change if available
+                    next_point = None
+                    for p in historical_data:
+                        if p.get('timestamp', 0) > point.get('timestamp', 0):
+                            next_point = p
+                            break
+                            
+                    if not next_point:
+                        continue
+                        
+                    dt_hours = (next_point['timestamp'] - point['timestamp']) / 3600  # seconds to hours
+                    if dt_hours <= 0 or dt_hours > 2:  # Reasonable time window
+                        continue
+                        
+                    actual_temp_change = (next_point['indoor_temp'] - t_in) / dt_hours
+                    
+                    # Strict physics validation for natural thermal response
+                    temp_diff = t_out - t_in
+                    
+                    # Check if this follows natural thermal physics
+                    if abs(temp_diff) > 0.5:  # Significant temperature difference
+                        if temp_diff > 0.5 and actual_temp_change < -0.2:
+                            # Outdoor warmer but significant cooling - possible HVAC influence
+                            physics_violations += 1
+                            continue
+                        elif temp_diff < -0.5 and actual_temp_change > 0.2:
+                            # Outdoor cooler but significant warming - possible HVAC influence
+                            physics_violations += 1
+                            continue
+                            
+                    # Validate rate is realistic for natural response
+                    max_natural_rate = min(3.0, abs(temp_diff) * 0.6)
+                    if abs(actual_temp_change) > max_natural_rate:
+                        physics_violations += 1
+                        continue
+                        
+                    # This point passes physics validation - use for natural parameter training
+                    phi = self._build_clean_natural_vector(t_in, t_out, h_in, h_out, solar)
+                    natural_rls.update(phi, actual_temp_change)
+                    valid_natural_updates += 1
+                    
+                except Exception as e:
+                    logger.debug(f"Error processing natural data point: {e}")
+                    continue
+                    
+            logger.info(f"   Physics-valid natural updates: {valid_natural_updates}")
+            logger.info(f"   Physics violations filtered: {physics_violations}")
+            
+            if valid_natural_updates >= 5:
+                # Apply the corrected natural parameters to the main model
+                # Only update the natural thermal coefficients, preserve HVAC coefficients
+                old_theta = self.rls.theta.copy()
+                
+                # Update natural thermal parameters: [temp_diff, 0, 0, baseline, enthalpy, solar]
+                self.rls.theta[0] = natural_rls.theta[0]  # Temperature difference coefficient
+                # Keep theta[1] and theta[2] (HVAC coefficients) unchanged
+                self.rls.theta[3] = natural_rls.theta[3]  # Baseline drift
+                self.rls.theta[4] = natural_rls.theta[4]  # Enthalpy coefficient
+                self.rls.theta[5] = natural_rls.theta[5]  # Solar coefficient
+                
+                logger.info("📊 Retroactive correction applied:")
+                logger.info(f"   Natural temp coeff: {old_theta[0]:.4f} → {self.rls.theta[0]:.4f}")
+                logger.info(f"   Baseline drift: {old_theta[3]:.4f} → {self.rls.theta[3]:.4f}") 
+                logger.info(f"   Enthalpy coeff: {old_theta[4]:.4f} → {self.rls.theta[4]:.4f}")
+                logger.info(f"   Solar coeff: {old_theta[5]:.4f} → {self.rls.theta[5]:.4f}")
+                logger.info(f"   HVAC coefficients preserved: Heat={self.rls.theta[1]:.4f}, Cool={self.rls.theta[2]:.4f}")
+                
+                # Save corrected parameters
+                await self.save_parameters()
+                
+                logger.info("✅ Retroactive physics correction completed successfully")
+                logger.info("🔬 Natural thermal predictions should now be more physically accurate")
+            else:
+                logger.warning("⚠️ Insufficient valid natural data for retroactive correction")
+                
+        except Exception as e:
+            logger.error(f"❌ Error in retroactive physics correction: {e}")
+            logger.exception("Retroactive correction error:")
             
     def _set_default_parameters(self):
         """Set reasonable default parameters with conservative uncontrolled behavior"""
