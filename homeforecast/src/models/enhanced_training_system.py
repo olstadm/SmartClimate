@@ -130,11 +130,18 @@ class EnhancedTrainingSystem:
         import time
         training_start_time = time.time()
         
-        logger.info("🏠 HomeForecast Enhanced Training System v2.0.8")
+        logger.info("🏠 HomeForecast Enhanced Training System v2.0.9")
         logger.info(f"📋 Building: {self.building_model.get('building_type', 'Unknown') if self.building_model else 'No model'}")
         logger.info(f"🌤️  Weather: {self.weather_dataset.get('location', {}).get('city', 'Unknown') if self.weather_dataset else 'No dataset'}")
         logger.info(f"⏱️  Training Duration: {training_duration_hours} hours")
         logger.info("=" * 60)
+        
+        # Also print to console to ensure visibility
+        print("🏠 HomeForecast Enhanced Training System v2.0.9")
+        print(f"📋 Building: {self.building_model.get('building_type', 'Unknown') if self.building_model else 'No model'}")
+        print(f"🌤️  Weather: {self.weather_dataset.get('location', {}).get('city', 'Unknown') if self.weather_dataset else 'No dataset'}")
+        print(f"⏱️  Training Duration: {training_duration_hours} hours")
+        print("=" * 60)
         
         if not self.building_model:
             raise ValueError("Building model must be loaded first (use load_building_model)")
@@ -155,6 +162,7 @@ class EnhancedTrainingSystem:
         
         # Stage 1: Generate training scenarios with progress reporting
         logger.info("📊 STAGE 1: Generating HVAC scenario data...")
+        print("📊 STAGE 1: Generating HVAC scenario data...")
         stage_start_time = time.time()
         
         for i, scenario in enumerate(hvac_scenarios):
@@ -164,6 +172,7 @@ class EnhancedTrainingSystem:
                 progress_callback(progress, f"Generating {scenario} scenario data... ({elapsed_minutes:.1f}m)")
                 
             logger.info(f"   🔄 Scenario {i+1}/{total_scenarios}: {scenario.upper()} mode")
+            print(f"   🔄 Scenario {i+1}/{total_scenarios}: {scenario.upper()} mode")
             scenario_data = self._simulate_hvac_scenario(
                 scenario, 
                 training_duration_hours // len(hvac_scenarios),
@@ -172,9 +181,11 @@ class EnhancedTrainingSystem:
             )
             training_data.extend(scenario_data)
             logger.info(f"   ✅ Generated {len(scenario_data)} data points for {scenario} scenario")
+            print(f"   ✅ Generated {len(scenario_data)} data points for {scenario} scenario")
             
         stage_elapsed = (time.time() - stage_start_time) / 60
         logger.info(f"✅ STAGE 1 Complete: Generated {len(training_data)} total training samples in {stage_elapsed:.1f}m")
+        print(f"✅ STAGE 1 Complete: Generated {len(training_data)} total training samples in {stage_elapsed:.1f}m")
         
         if progress_callback:
             elapsed_minutes = (time.time() - training_start_time) / 60
@@ -182,6 +193,7 @@ class EnhancedTrainingSystem:
             
         # Stage 2: Train thermal model with enhanced data
         logger.info("🧠 STAGE 2: Physics validation and thermal model training...")
+        print("🧠 STAGE 2: Physics validation and thermal model training...")
         stage2_start_time = time.time()
         self.training_results = self._train_with_physics_validation(training_data, progress_callback, training_start_time)
         
@@ -192,6 +204,14 @@ class EnhancedTrainingSystem:
         logger.info(f"   Model accuracy: {self.training_results.get('accuracy_score', 0):.1%}")
         logger.info(f"   Physics compliance: {self.training_results.get('physics_compliance', 0):.1%}")
         logger.info("=" * 60)
+        
+        # Also print completion to console
+        print("=" * 60)
+        print(f"✅ Enhanced Training COMPLETE - Total time: {total_elapsed:.1f} minutes")
+        print(f"   Training samples: {len(training_data)}")
+        print(f"   Model accuracy: {self.training_results.get('accuracy_score', 0):.1%}")
+        print(f"   Physics compliance: {self.training_results.get('physics_compliance', 0):.1%}")
+        print("=" * 60)
         
         return self.training_results
     
@@ -375,14 +395,16 @@ class EnhancedTrainingSystem:
         total_points = len(training_data)
         
         for i, data_point in enumerate(training_data):
-            if progress_callback and i % 100 == 0:  # Update every 100 samples
+            # More frequent progress updates to identify hangs
+            if progress_callback and i % 50 == 0:  # Update every 50 samples instead of 100
                 progress = 80 + (i / total_points) * 20  # Use remaining 20%
                 elapsed_minutes = (time.time() - training_start_time) / 60
                 progress_callback(progress, f"Validating sample {i+1}/{total_points}... ({elapsed_minutes:.1f}m)")
                 
-                # Log validation progress every 1000 samples
-                if i % 1000 == 0 and i > 0:
-                    logger.info(f"   📊 Validated {i}/{total_points} samples ({i/total_points*100:.1f}%) - Valid: {valid_samples}, Violations: {physics_violations}")
+            # Log validation progress every 500 samples for more visibility
+            if i % 500 == 0:
+                logger.info(f"   📊 Validated {i}/{total_points} samples ({i/total_points*100:.1f}%) - Valid: {valid_samples}, Violations: {physics_violations}")
+                print(f"   📊 Validated {i}/{total_points} samples ({i/total_points*100:.1f}%) - Valid: {valid_samples}, Violations: {physics_violations}")
                 
             # Validate physics constraints
             temp_change = data_point['temp_change_per_hour']
@@ -408,6 +430,7 @@ class EnhancedTrainingSystem:
         if progress_callback:
             elapsed_minutes = (time.time() - training_start_time) / 60
             progress_callback(100, f"Training completed! ({elapsed_minutes:.1f}m total)")
+            print(f"🎯 Progress callback: 100% - Training completed! ({elapsed_minutes:.1f}m total)")
             
         # Log final validation results
         logger.info(f"✅ STAGE 2 Complete: Physics validation finished")
@@ -415,6 +438,13 @@ class EnhancedTrainingSystem:
         logger.info(f"   Physics violations: {physics_violations}")
         logger.info(f"   Accuracy: {accuracy_score:.1%}")
         logger.info(f"   Physics compliance: {physics_compliance:.1%}")
+        
+        # Print final validation results to console
+        print(f"✅ STAGE 2 Complete: Physics validation finished")
+        print(f"   Final validation results: {valid_samples}/{len(training_data)} samples valid")
+        print(f"   Physics violations: {physics_violations}")
+        print(f"   Accuracy: {accuracy_score:.1%}")
+        print(f"   Physics compliance: {physics_compliance:.1%}")
         
         results = {
             'total_samples': len(training_data),
