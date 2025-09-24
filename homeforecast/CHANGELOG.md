@@ -1,5 +1,30 @@
 # HomeForecast Changelog
 
+All notable changes to HomeForecast will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [2.2.1] - 2025-09-23
+
+### Critical Hotfixes
+- **Home Assistant Client**: Fixed "Timeout context manager should be used inside a task" errors affecting all sensor data collection
+- **DataStore Integration**: Fixed AttributeError in `retroactive_physics_correction` method - corrected to use `get_recent_measurements`
+- **None Value Handling**: Comprehensive fixes for `None` temperature values causing TypeError in enthalpy and trend calculations
+- **Session Management**: Enhanced aiohttp session validation and automatic recovery from connection issues
+
+### Physics Engine Improvements  
+- **Smart Baseline Correction**: Enhanced baseline drift handling to prevent physics violations in natural thermal predictions
+- **Advanced Diagnostics**: Added detailed logging for natural physics calculations to aid in troubleshooting
+- **Robust Error Recovery**: Improved fallback mechanisms when sensor data is unavailable or corrupted
+
+### System Stability
+- **Enhanced Validation**: Added comprehensive data type checking throughout thermal model calculations
+- **Graceful Degradation**: System continues operating with fallback values when sensors are offline
+- **Error Context**: Improved error messages with specific context about missing data and recovery actions
+
+## [2.2.0] - 2025-09-23recast Changelog
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
