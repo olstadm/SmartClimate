@@ -171,18 +171,21 @@ class ForecastEngine:
             }
             
             # Generate idle trajectory (no HVAC control)
+            logger.info("🌡️ Generating NO-CONTROL trajectory (natural thermal behavior)")
             idle_trajectory = await self._simulate_trajectory(
                 initial_state, outdoor_series, control_mode='idle', 
                 current_time_index=current_time_index
             )
             
             # Generate controlled trajectory (smart HVAC control)  
+            logger.info("🎛️ Generating HVAC-CONTROLLED trajectory (smart climate control)")
             controlled_trajectory = await self._simulate_trajectory(
                 initial_state, outdoor_series, control_mode='smart',
                 current_time_index=current_time_index
             )
             
             # Generate current HVAC trajectory (maintain current state)
+            logger.info(f"🔄 Generating CURRENT-STATE trajectory (maintain {current_data.get('hvac_state', 'off')} mode)")
             current_trajectory = await self._simulate_trajectory(
                 initial_state, outdoor_series, control_mode='current',
                 fixed_hvac_state=current_data.get('hvac_state', 'off'),

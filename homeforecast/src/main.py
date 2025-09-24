@@ -406,6 +406,17 @@ class HomeForecast:
                 await self.thermal_model.apply_enhanced_training_results(self.training_results)
                 self.enhanced_training_applied = True
                 logger.info(f"✅ Enhanced training results applied (accuracy: {self.training_results.get('accuracy_score', 0):.1%})")
+                
+                # Validate model behavior after enhanced training
+                logger.info("🧪 Validating enhanced model behavior...")
+                # Use default conditions for validation
+                default_conditions = {'indoor_temp': 72.0, 'outdoor_temp': 70.0, 'indoor_humidity': 50.0}
+                validation_results = await self.thermal_model.validate_model_behavior(default_conditions)
+                if validation_results['overall_valid']:
+                    logger.info(f"✅ Model validation passed: {validation_results['scenarios_passed']}/{validation_results['scenarios_tested']} scenarios")
+                else:
+                    logger.warning(f"⚠️ Model validation issues: {validation_results['scenarios_passed']}/{validation_results['scenarios_tested']} scenarios passed")
+                    
             except Exception as e:
                 logger.error(f"❌ Failed to apply enhanced training results: {e}")
                 # Mark as applied to avoid repeated failures

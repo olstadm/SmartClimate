@@ -617,12 +617,9 @@ class ThermalModel:
             clean_theta[2] = 0.0  # Zero cooling coefficient  
             dT_dt = np.dot(phi, clean_theta)
             
-            # Log the calculation details for debugging
-            if abs(dT_dt) > 0.1 or (t_out - t_in) * dT_dt < 0:  # Log significant changes or physics violations
-                logger.info(f"🔬 Natural physics calculation:")
-                logger.info(f"   T_diff: {t_out - t_in:.2f}°F, phi: {phi}")
-                logger.info(f"   clean_theta: {clean_theta}")
-                logger.info(f"   Raw dT_dt: {dT_dt:.4f}°F/hr")
+            # Log the calculation details for debugging (only for significant changes)
+            if abs(dT_dt) > 0.5 or (abs(t_out - t_in) > 2.0 and (t_out - t_in) * dT_dt < 0):  # Only log big changes or physics violations
+                logger.info(f"🔬 Natural physics: T_diff={t_out - t_in:.1f}°F → dT_dt={dT_dt:.3f}°F/hr")
         else:
             # Normal prediction with all parameters for HVAC scenarios
             phi = self._build_feature_vector(t_in, t_out, h_in, h_out, hvac_state, solar)
@@ -690,10 +687,9 @@ class ThermalModel:
             absolute_natural_max = 3.0  # °F/hour absolute maximum for natural drift
             dT_dt = max(-absolute_natural_max, min(absolute_natural_max, dT_dt))
                 
-            # Log physics corrections for uncontrolled scenarios
-            if abs(dT_dt) > 0.5 or len(self.parameter_history) < 50:  # Log significant changes or early learning
-                logger.info(f"🔬 Natural physics (no HVAC): T_in={t_in:.1f}°F, T_out={t_out:.1f}°F, " +
-                          f"dT_dt={dT_dt:.3f}°F/hr (diff={temp_diff:.1f}°F, τ={thermal_time_constant:.1f}h)")
+            # Log physics corrections only for significant violations
+            if abs(dT_dt) > 1.0:  # Only log significant temperature changes
+                logger.info(f"🔬 Natural physics: T_in={t_in:.1f}°F, T_out={t_out:.1f}°F, dT_dt={dT_dt:.2f}°F/hr")
         else:
             # HVAC active: Allow stronger heating/cooling but still bounded
             temp_diff = t_out - t_in
@@ -839,14 +835,23 @@ class ThermalModel:
                                 
                             # Check if dimensions match
                             if len(validated_theta) == len(self.rls.theta):
-                                logger.info(f"📊 Applying validated theta parameters: {validated_theta}")
+                                logger.info(f"✅ Applying validated RC parameters from enhanced training:")
+                                logger.info(f"   Thermal coupling (a): {validated_theta[0]:.4f} (τ={1.0/validated_theta[0]:.1f}h)")
+                                logger.info(f"   Heating rate: {validated_theta[1]:.1f}°F/hr")
+                                logger.info(f"   Cooling rate: {validated_theta[2]:.1f}°F/hr")
+                                logger.info(f"   Baseline drift: {validated_theta[3]:.3f}°F/hr")
+                                
                                 self.rls.theta = validated_theta
                                 
                                 # Also update thermal_model.theta if it exists (from building model integration)
                                 if hasattr(self, 'theta'):
                                     self.theta = validated_theta[0]  # The 'a' parameter (1/τ)
+                                    
+                                logger.info("🎯 Enhanced training parameters successfully integrated into RC model")
                             else:
                                 logger.warning(f"⚠️ Theta dimension mismatch: got {len(validated_theta)}, expected {len(self.rls.theta)}")
+                                logger.warning(f"   Enhanced training theta: {validated_theta}")
+                                logger.warning(f"   RC model expecting {len(self.rls.theta)} parameters")
                                 
                         except Exception as e:
                             logger.error(f"❌ Error processing theta parameters: {e}")
@@ -864,13 +869,11 @@ class ThermalModel:
             # in the physics-validated parameters
             self.rls.P = np.eye(self.rls.n_params) * 100  # Lower uncertainty than initial (1000 -> 100)
             
-            # Log the parameter changes
+            # Log the parameter changes (condensed)
             new_params = self.get_parameters()
             logger.info("📊 Enhanced training parameter updates:")
             logger.info(f"   Time constant: {old_params['time_constant']:.1f}h → {new_params['time_constant']:.1f}h")
-            logger.info(f"   Heating rate: {old_params['heating_rate']:.1f}°F/h → {new_params['heating_rate']:.1f}°F/h")  
-            logger.info(f"   Cooling rate: {old_params['cooling_rate']:.1f}°F/h → {new_params['cooling_rate']:.1f}°F/h")
-            logger.info(f"   Baseline drift: {old_params['baseline_drift']:.3f}°F/h → {new_params['baseline_drift']:.3f}°F/h")
+            logger.info(f"   HVAC rates: {old_params['heating_rate']:.1f}/{old_params['cooling_rate']:.1f} → {new_params['heating_rate']:.1f}/{new_params['cooling_rate']:.1f}°F/h")
             
             # Save the enhanced parameters
             await self.save_parameters()
@@ -1047,18 +1050,92 @@ class ThermalModel:
             logger.exception("Retroactive correction error:")
             
     def _set_default_parameters(self):
-        """Set reasonable default parameters with conservative uncontrolled behavior"""
-        # Default values based on typical home characteristics (Fahrenheit)
-        # More conservative parameters to prevent unrealistic temperature drops
+        """Set realistic default parameters based on typical residential HVAC systems"""
+        # Realistic values based on typical home characteristics (Fahrenheit)
+        # Parameters designed for physics-compliant behavior from start
         self.rls.theta = np.array([
-            0.15,   # a: 1/τ (τ = 6.7 hours - faster thermal response)
-            3.6,    # k_H: 3.6°F/hour heating rate (2°C/hour * 1.8)
-            -4.5,   # k_C: -4.5°F/hour cooling rate (-2.5°C/hour * 1.8)
-            0.0,    # b: Zero baseline drift (conservative - no spontaneous cooling)
-            0.02,   # k_E: Minimal enthalpy effect (more conservative)
-            0.5     # k_S: Moderate solar gain (0.28°C/hour * 1.8)
+            0.12,   # a: 1/τ (τ = 8.3 hours - typical residential thermal time constant)
+            2.5,    # k_H: 2.5°F/hour heating rate (realistic for gas furnace)
+            -3.0,   # k_C: -3.0°F/hour cooling rate (realistic for central AC)
+            0.0,    # b: Zero baseline drift (physics-compliant - no spontaneous temperature change)
+            0.015,  # k_E: Minimal enthalpy effect (conservative for initial model)
+            0.3     # k_S: Moderate solar gain (realistic for typical home)
         ])
-        logger.info("✅ Using conservative default thermal model parameters (no spontaneous cooling)")
+        logger.info("✅ Initialized with realistic HVAC parameters (2.5°F/hr heat, -3.0°F/hr cool)")
+        
+    async def validate_model_behavior(self, current_conditions: Dict) -> Dict:
+        """
+        Validate model behavior with simulation scenarios
+        Tests heating, cooling, and natural thermal response
+        """
+        logger.info("🧪 Running model behavior validation...")
+        
+        scenarios = []
+        current_indoor = current_conditions.get('indoor_temp', 70.0)
+        current_outdoor = current_conditions.get('outdoor_temp', 70.0) 
+        current_humidity = current_conditions.get('indoor_humidity', 50.0)
+        
+        # Test scenarios: [indoor, outdoor, hvac_state, expected_direction, description]
+        test_cases = [
+            # Natural thermal response (HVAC off)
+            [72.0, 80.0, 'off', 'warming', 'Natural warming (outdoor warmer)'],
+            [78.0, 65.0, 'off', 'cooling', 'Natural cooling (outdoor cooler)'], 
+            [70.0, 70.0, 'off', 'stable', 'Natural equilibrium'],
+            
+            # HVAC heating
+            [68.0, 60.0, 'heat', 'heating', 'Heating mode (cold outdoor)'],
+            [70.0, 80.0, 'heat', 'heating', 'Heating mode (warm outdoor)'],
+            
+            # HVAC cooling  
+            [78.0, 85.0, 'cool', 'cooling', 'Cooling mode (hot outdoor)'],
+            [76.0, 65.0, 'cool', 'cooling', 'Cooling mode (cool outdoor)'],
+        ]
+        
+        for indoor, outdoor, hvac, expected, description in test_cases:
+            dT_dt = self.predict_temperature_change(
+                t_in=indoor, t_out=outdoor, 
+                h_in=current_humidity, h_out=current_humidity,
+                hvac_state=hvac, solar=0.0
+            )
+            
+            # Validate behavior
+            is_valid = True
+            if expected == 'warming' and dT_dt <= 0:
+                is_valid = False
+            elif expected == 'cooling' and dT_dt >= 0:
+                is_valid = False  
+            elif expected == 'stable' and abs(dT_dt) > 0.2:
+                is_valid = False
+            elif expected == 'heating' and dT_dt <= 0:
+                is_valid = False
+            elif expected == 'cooling' and dT_dt >= 0:
+                is_valid = False
+                
+            status = "✅ PASS" if is_valid else "❌ FAIL"
+            scenarios.append({
+                'description': description,
+                'indoor_temp': indoor,
+                'outdoor_temp': outdoor, 
+                'hvac_state': hvac,
+                'predicted_rate': dT_dt,
+                'expected': expected,
+                'valid': is_valid
+            })
+            
+            logger.info(f"   {status} {description}: {dT_dt:+.2f}°F/hr")
+            
+        passed = sum(1 for s in scenarios if s['valid'])
+        total = len(scenarios)
+        
+        logger.info(f"🧪 Validation Results: {passed}/{total} scenarios passed")
+        
+        return {
+            'scenarios_tested': total,
+            'scenarios_passed': passed,
+            'success_rate': passed / total,
+            'scenarios': scenarios,
+            'overall_valid': passed == total
+        }
         
     async def retrain_ml_correction(self):
         """Retrain the ML correction model"""

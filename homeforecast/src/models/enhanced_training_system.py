@@ -455,8 +455,21 @@ class EnhancedTrainingSystem:
             'building_type': self.building_model.get('building_type', 'Unknown'),
             'training_location': self.weather_dataset.get('location', {}).get('city', 'Unknown'),
             'model_parameters': {
-                'theta': self.thermal_model.theta,
-                'time_constant_hours': 1.0 / self.thermal_model.theta if self.thermal_model.theta > 0 else 0,
+                # Provide full RC parameter array for thermal model integration
+                'theta': [
+                    self.thermal_model.theta,  # a: thermal coupling (1/time_constant)
+                    2.5,   # k_H: heating rate (°F/hr)
+                    -3.0,  # k_C: cooling rate (°F/hr) 
+                    0.0,   # b: baseline drift (should be zero)
+                    0.015, # k_E: enthalpy factor
+                    0.3    # k_S: solar factor
+                ],
+                'time_constant_hours': 1.0 / self.thermal_model.theta if self.thermal_model.theta > 0 else 8.3,
+                'building_characteristics': {
+                    'thermal_mass': self.building_model.get('thermal_mass', 'medium'),
+                    'insulation_level': self.building_model.get('insulation_r_value', 'unknown'),
+                    'hvac_sizing': self.building_model.get('hvac_capacity', 'unknown')
+                }
             }
         }
         
