@@ -1968,6 +1968,9 @@ class HomeForecastDashboard {
             // Show existing results if available
             if (status.training_completed && status.training_results) {
                 this.displayTrainingResults(status.training_results);
+                this.updateModelStatus(status.training_results); // Update UI state on page load
+            } else {
+                this.updateModelStatus(null); // Show training controls if no model is trained
             }
 
         } catch (error) {
@@ -2061,6 +2064,7 @@ class HomeForecastDashboard {
 
                 setTimeout(() => {
                     this.displayTrainingResults(result.training_results);
+                    this.updateModelStatus(result.training_results); // Update UI state based on training results
                     this.updateV2Status();
                 }, 1000);
 
@@ -2231,6 +2235,104 @@ class HomeForecastDashboard {
             this.showNotification(`Error applying model: ${error.message}`, 'error');
         }
     }
+
+    showRetrainOptions() {
+        console.log('Showing retrain options');
+        
+        // Hide model status section and show training controls
+        const modelStatusSection = document.getElementById('modelStatusSection');
+        const trainingControlsSection = document.getElementById('trainingControlsSection');
+        const trainingButtonText = document.getElementById('trainingButtonText');
+        const cancelButton = document.getElementById('cancelRetrainBtn');
+        
+        if (modelStatusSection) {
+            modelStatusSection.style.display = 'none';
+        }
+        
+        if (trainingControlsSection) {
+            trainingControlsSection.style.display = 'block';
+        }
+        
+        if (trainingButtonText) {
+            trainingButtonText.textContent = 'Start Model Retraining';
+        }
+        
+        if (cancelButton) {
+            cancelButton.style.display = 'inline-block';
+        }
+        
+        // Set default values for retraining (can be different from initial training)
+        const durationInput = document.getElementById('trainingDurationV2');
+        if (durationInput) {
+            durationInput.value = 720; // Default to 1 month for retraining
+        }
+    }
+
+    cancelRetrain() {
+        console.log('Cancelling retrain');
+        
+        // Show model status section and hide training controls
+        const modelStatusSection = document.getElementById('modelStatusSection');
+        const trainingControlsSection = document.getElementById('trainingControlsSection');
+        const trainingButtonText = document.getElementById('trainingButtonText');
+        const cancelButton = document.getElementById('cancelRetrainBtn');
+        
+        if (modelStatusSection) {
+            modelStatusSection.style.display = 'block';
+        }
+        
+        if (trainingControlsSection) {
+            trainingControlsSection.style.display = 'none';
+        }
+        
+        if (trainingButtonText) {
+            trainingButtonText.textContent = 'Start Enhanced Training';
+        }
+        
+        if (cancelButton) {
+            cancelButton.style.display = 'none';
+        }
+    }
+
+    updateModelStatus(trainingResults) {
+        console.log('Updating model status display');
+        
+        const modelStatusSection = document.getElementById('modelStatusSection');
+        const trainingControlsSection = document.getElementById('trainingControlsSection');
+        const currentModelAccuracy = document.getElementById('currentModelAccuracy');
+        const currentModelSamples = document.getElementById('currentModelSamples');
+        const currentModelTimestamp = document.getElementById('currentModelTimestamp');
+        
+        if (trainingResults && trainingResults.accuracy_score >= 0.85) {
+            // Show model status section, hide training controls
+            if (modelStatusSection) {
+                modelStatusSection.style.display = 'block';
+            }
+            if (trainingControlsSection) {
+                trainingControlsSection.style.display = 'none';
+            }
+            
+            // Update model status display
+            if (currentModelAccuracy) {
+                currentModelAccuracy.textContent = `${(trainingResults.accuracy_score * 100).toFixed(1)}%`;
+            }
+            if (currentModelSamples) {
+                currentModelSamples.textContent = trainingResults.total_samples?.toLocaleString() || '-';
+            }
+            if (currentModelTimestamp) {
+                const now = new Date();
+                currentModelTimestamp.textContent = now.toLocaleDateString() + ' ' + now.toLocaleTimeString();
+            }
+        } else {
+            // Show training controls, hide model status
+            if (modelStatusSection) {
+                modelStatusSection.style.display = 'none';
+            }
+            if (trainingControlsSection) {
+                trainingControlsSection.style.display = 'block';
+            }
+        }
+    }
 }
 
 // Global functions for V2.0 training
@@ -2247,6 +2349,21 @@ function startV2Training() {
 function applyEnhancedModel() {
     if (window.dashboard) {
         window.dashboard.applyEnhancedModel();
+    }
+}
+
+// Global functions for model retraining
+function showRetrainOptions() {
+    console.log('Showing retrain options');
+    if (window.dashboard) {
+        window.dashboard.showRetrainOptions();
+    }
+}
+
+function cancelRetrain() {
+    console.log('Cancelling retrain');
+    if (window.dashboard) {
+        window.dashboard.cancelRetrain();
     }
 }
 

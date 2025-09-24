@@ -834,7 +834,7 @@ def create_app(homeforecast_instance):
             import sys
             import platform
             system_info = {
-                'addon_version': '2.1.1',
+                'addon_version': '2.1.2',
                 'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 'platform': platform.system(),
                 'log_level': logging.getLogger().getEffectiveLevel()
@@ -871,7 +871,7 @@ def create_app(homeforecast_instance):
 
             response_data = {
                 'status': 'running',
-                'version': '2.1.1',
+                'version': '2.1.2',
                 'last_update': app.homeforecast.thermal_model.last_update.isoformat() if app.homeforecast.thermal_model.last_update else None,
                 'last_update_display': last_update_str,
                 'timezone': getattr(app.homeforecast, 'timezone', 'UTC'),
@@ -1599,7 +1599,7 @@ information about HomeForecast operation.
         return jsonify({
             'success': True,
             'message': 'V2.0 API is working',
-            'version': '2.1.0',
+            'version': '2.1.2',
             'enhanced_training_available': HAS_ENHANCED_TRAINING,
             'simple_training_available': globals().get('HAS_SIMPLE_TRAINING', False),
             'training_available': training_available,
@@ -1897,6 +1897,7 @@ information about HomeForecast operation.
             
             # Store training results
             homeforecast_instance.training_results = training_results
+            homeforecast_instance.enhanced_training_applied = False  # Reset flag to trigger application
             
             logger.info(f"✅ Enhanced training completed - Accuracy: {training_results.get('accuracy_score', 0):.3f}")
             
@@ -1937,7 +1938,7 @@ information about HomeForecast operation.
             training_completed = hasattr(homeforecast_instance, 'training_results') and homeforecast_instance.training_results
             
             status = {
-                'version': '2.0.3',
+                'version': '2.1.2',
                 'building_model_loaded': building_model_loaded,
                 'weather_dataset_loaded': weather_dataset_loaded,
                 'training_completed': training_completed,
@@ -1972,7 +1973,7 @@ information about HomeForecast operation.
         except Exception as e:
             logger.error(f"❌ Error getting v2.0 model status: {e}")
             return jsonify({
-                'version': '2.0.3',
+                'version': '2.1.2',
                 'error': f'Error getting model status: {str(e)}',
                 'building_model_loaded': False,
                 'weather_dataset_loaded': False,

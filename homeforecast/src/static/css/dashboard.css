@@ -723,6 +723,72 @@ body {
     margin: 20px 0;
 }
 
+/* Model Status Section */
+.model-status {
+    background: var(--sub-card-background);
+    border-radius: var(--border-radius);
+    padding: 20px;
+    margin: 20px 0;
+    border-left: 4px solid var(--success-color);
+}
+
+.status-header h3 {
+    margin: 0 0 15px 0;
+    color: var(--success-color);
+    display: flex;
+    align-items: center;
+}
+
+.model-info-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.info-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: var(--background);
+    border-radius: 4px;
+}
+
+.info-label {
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.info-value {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.retrain-controls {
+    display: flex;
+    justify-content: flex-end;
+}
+
+/* Training Actions */
+.training-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.training-actions .btn {
+    min-width: 140px;
+}
+
+/* Training Controls Enhancements */
+.training-controls small {
+    display: block;
+    color: var(--text-secondary);
+    font-size: 0.85em;
+    margin-top: 4px;
+    font-style: italic;
+}
+
 .training-progress {
     background: #595959;
     border-radius: var(--border-radius);

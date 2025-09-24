@@ -351,11 +351,42 @@
                     Enhanced RC Model Training
                 </h2>
                 
-                <div class="training-controls">
+                <!-- Model Status Section (shown when model is trained) -->
+                <div id="modelStatusSection" class="model-status" style="display: none;">
+                    <div class="status-header">
+                        <h3>✅ Enhanced Model Status</h3>
+                        <div class="model-info-summary">
+                            <div class="info-item">
+                                <span class="info-label">Accuracy:</span>
+                                <span class="info-value" id="currentModelAccuracy">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Training Samples:</span>
+                                <span class="info-value" id="currentModelSamples">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Trained:</span>
+                                <span class="info-value" id="currentModelTimestamp">-</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="retrain-controls">
+                        <button id="retrainModelBtn" class="btn btn-secondary" onclick="showRetrainOptions()">
+                            <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/>
+                            </svg>
+                            Retrain Model
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Training Controls Section (shown when no model or retraining) -->
+                <div id="trainingControlsSection" class="training-controls">
                     <div class="grid" style="margin-bottom: 20px;">
                         <div class="metric">
                             <label for="trainingDurationV2">Training Duration (hours):</label>
                             <input type="number" id="trainingDurationV2" value="168" min="24" max="8760" class="comfort-input">
+                            <small>168 hours = 1 week, 720 hours = 1 month, 8760 hours = 1 year</small>
                         </div>
                         <div class="metric">
                             <label>HVAC Scenarios:</label>
@@ -368,12 +399,17 @@
                         </div>
                     </div>
                     
-                    <button id="startV2TrainingBtn" class="btn btn-primary" onclick="startV2Training()" disabled>
-                        <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M8 5v10l7-5-7-5z"/>
-                        </svg>
-                        Start Enhanced Training
-                    </button>
+                    <div class="training-actions">
+                        <button id="startV2TrainingBtn" class="btn btn-primary" onclick="startV2Training()" disabled>
+                            <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M8 5v10l7-5-7-5z"/>
+                            </svg>
+                            <span id="trainingButtonText">Start Enhanced Training</span>
+                        </button>
+                        <button id="cancelRetrainBtn" class="btn btn-secondary" onclick="cancelRetrain()" style="display: none;">
+                            Cancel
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Training Progress -->

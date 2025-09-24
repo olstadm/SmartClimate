@@ -1,5 +1,5 @@
 """
-Enhanced Training System for HomeForecast v2.1.1
+Enhanced Training System for HomeForecast v2.1.2
 Integrates DOE building models and EPW weather data for accurate thermal predictions
 """
 import logging
@@ -130,14 +130,14 @@ class EnhancedTrainingSystem:
         import time
         training_start_time = time.time()
         
-        logger.info("🏠 HomeForecast Enhanced Training System v2.1.1")
+        logger.info("🏠 HomeForecast Enhanced Training System v2.1.2")
         logger.info(f"📋 Building: {self.building_model.get('building_type', 'Unknown') if self.building_model else 'No model'}")
         logger.info(f"🌤️  Weather: {self.weather_dataset.get('location', {}).get('city', 'Unknown') if self.weather_dataset else 'No dataset'}")
         logger.info(f"⏱️  Training Duration: {training_duration_hours} hours")
         logger.info("=" * 60)
         
         # Also print to console to ensure visibility
-        print("🏠 HomeForecast Enhanced Training System v2.1.1")
+        print("🏠 HomeForecast Enhanced Training System v2.1.2")
         print(f"📋 Building: {self.building_model.get('building_type', 'Unknown') if self.building_model else 'No model'}")
         print(f"🌤️  Weather: {self.weather_dataset.get('location', {}).get('city', 'Unknown') if self.weather_dataset else 'No dataset'}")
         print(f"⏱️  Training Duration: {training_duration_hours} hours")
@@ -514,7 +514,7 @@ class EnhancedTrainingSystem:
             
         output_data = {
             'timestamp': datetime.now().isoformat(),
-            'version': '2.0.3',
+            'version': '2.1.2',
             'building_model': self.building_model,
             'weather_dataset_info': {
                 'location': self.weather_dataset.get('location', {}),

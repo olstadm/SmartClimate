@@ -121,6 +121,7 @@ class HomeForecast:
         self.weather_dataset = None         # EPW weather dataset
         self.training_results = None        # Enhanced training results
         self.enhanced_training_system = None  # Enhanced training system instance
+        self.enhanced_training_applied = False  # Flag to track if results have been applied
         
     async def initialize(self):
         """Initialize all components"""
@@ -303,6 +304,15 @@ class HomeForecast:
                 cycle_status['steps_failed'].append(f'thermal_model_update: {str(e)}')
                 # Continue with existing model state
             
+            # Step 4.5: Apply enhanced training results if available (important for accuracy)
+            try:
+                await self._apply_pending_enhanced_training()
+                cycle_status['steps_completed'].append('enhanced_training_application')
+            except Exception as e:
+                logger.warning(f"⚠️ Enhanced training application failed: {e}")
+                cycle_status['steps_failed'].append(f'enhanced_training_application: {str(e)}')
+                # Continue without enhanced training (affects accuracy but not operation)
+            
             # Step 5: Generate forecast (critical for system function)
             logger.info("🔮 Step 5: Generating forecast...")
             forecast_result = None
@@ -383,6 +393,24 @@ class HomeForecast:
             cycle_status['steps_failed'].append(f'unexpected_error: {str(e)}')
             cycle_status['total_success'] = False
             await self._publish_system_health(cycle_status)
+
+    async def _apply_pending_enhanced_training(self):
+        """Apply enhanced training results to thermal model if new results are available"""
+        if (self.training_results and 
+            not self.enhanced_training_applied and 
+            self.training_results.get('accuracy_score', 0) >= 0.85):
+            
+            logger.info("🧠 Applying enhanced training results to thermal model...")
+            
+            try:
+                await self.thermal_model.apply_enhanced_training_results(self.training_results)
+                self.enhanced_training_applied = True
+                logger.info(f"✅ Enhanced training results applied (accuracy: {self.training_results.get('accuracy_score', 0):.1%})")
+            except Exception as e:
+                logger.error(f"❌ Failed to apply enhanced training results: {e}")
+                # Mark as applied to avoid repeated failures
+                self.enhanced_training_applied = True
+                raise e
 
     def _generate_simple_forecast(self, sensor_data: Dict, weather_forecast: Dict) -> Dict:
         """Generate a simple fallback forecast when the main engine fails"""

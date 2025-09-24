@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.2] - 2025-09-23
+
+### Enhanced Training System Integration & UI Improvements
+- **Enhanced Training Results Integration**: Physics-validated parameters from enhanced training now properly applied to thermal model predictions
+- **Thermal Model Parameter Application**: Added `apply_enhanced_training_results()` method to integrate training results into ongoing RC model calculations
+- **Retrain UI Functionality**: Added dynamic retrain controls with enhanced duration options (12h, 24h, 48h, 72h, 168h)
+- **Dynamic UI Visibility**: Training controls and progress indicators now show/hide based on model training state
+- **Model Status Display**: Added real-time model status section showing training completion and system readiness
+
+### Technical Improvements  
+- **Background Training Integration**: Enhanced training completion now triggers parameter application via update cycle
+- **Physics-Validated Parameter Integration**: Training results properly integrated into RLS theta parameters with accuracy validation
+- **Enhanced Training Application Flag**: Added system flag to ensure training results are applied exactly once per completion
+- **API Version Consistency**: Unified all version references to v2.1.2 across entire codebase
+- **Real-time Progress Tracking**: Maintained 1-second polling with comprehensive training status endpoints
+
+### Bug Fixes
+- **Training Results Application**: Resolved issue where 99.1% training accuracy wasn't improving actual predictions
+- **Parameter Integration Gap**: Fixed disconnect between successful enhanced training and ongoing thermal model predictions
+- **Version Consistency**: Updated all version references from mixed 2.0.3/2.1.0/2.1.1 to consistent 2.1.2
+
 ## [1.8.22] - 2025-09-23
 
 ### Enhanced Chart Data Structure API Support

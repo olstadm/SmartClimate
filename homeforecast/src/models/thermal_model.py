@@ -661,6 +661,68 @@ class ThermalModel:
         except Exception as e:
             logger.error(f"Error loading parameters: {e}", exc_info=True)
             self._set_default_parameters()
+    
+    async def apply_enhanced_training_results(self, training_results: Dict):
+        """
+        Apply physics-validated parameters from enhanced training to the thermal model
+        
+        Args:
+            training_results: Results from enhanced training system containing validated parameters
+        """
+        try:
+            if not training_results or training_results.get('accuracy_score', 0) < 0.85:
+                logger.warning(f"Enhanced training results quality too low (accuracy: {training_results.get('accuracy_score', 0):.3f}), not applying")
+                return
+                
+            logger.info("🧠 Applying enhanced training results to thermal model...")
+            logger.info(f"   Training accuracy: {training_results.get('accuracy_score', 0):.1%}")
+            logger.info(f"   Physics compliance: {training_results.get('physics_compliance', 0):.1%}")
+            logger.info(f"   Valid samples: {training_results.get('valid_samples', 0)}/{training_results.get('total_samples', 0)}")
+            
+            # Get current parameters for comparison
+            old_params = self.get_parameters()
+            
+            # Apply enhanced training parameters from model_parameters structure
+            if 'model_parameters' in training_results:
+                model_params = training_results['model_parameters']
+                
+                # The enhanced training system provides theta array with validated physics parameters
+                if 'theta' in model_params:
+                    validated_theta = np.array(model_params['theta'])
+                    if len(validated_theta) == len(self.rls.theta):
+                        logger.info(f"📊 Applying validated theta parameters: {validated_theta}")
+                        self.rls.theta = validated_theta
+                        
+                        # Also update thermal_model.theta if it exists (from building model integration)
+                        if hasattr(self, 'theta'):
+                            self.theta = validated_theta[0]  # The 'a' parameter (1/τ)
+                    
+            # Apply building-specific parameters if available
+            if 'building_type' in training_results:
+                logger.info(f"📋 Training was done for building type: {training_results['building_type']}")
+                
+            if 'training_location' in training_results:
+                logger.info(f"🌤️ Training was done for location: {training_results['training_location']}")
+                
+            # Reset covariance matrix to allow for some continued adaptation but with more confidence
+            # in the physics-validated parameters
+            self.rls.P = np.eye(self.rls.n_params) * 100  # Lower uncertainty than initial (1000 -> 100)
+            
+            # Log the parameter changes
+            new_params = self.get_parameters()
+            logger.info("📊 Enhanced training parameter updates:")
+            logger.info(f"   Time constant: {old_params['time_constant']:.1f}h → {new_params['time_constant']:.1f}h")
+            logger.info(f"   Heating rate: {old_params['heating_rate']:.1f}°F/h → {new_params['heating_rate']:.1f}°F/h")  
+            logger.info(f"   Cooling rate: {old_params['cooling_rate']:.1f}°F/h → {new_params['cooling_rate']:.1f}°F/h")
+            logger.info(f"   Baseline drift: {old_params['baseline_drift']:.3f}°F/h → {new_params['baseline_drift']:.3f}°F/h")
+            
+            # Save the enhanced parameters
+            await self.save_parameters()
+            
+            logger.info("✅ Enhanced training results successfully applied to thermal model")
+            
+        except Exception as e:
+            logger.error(f"❌ Error applying enhanced training results: {e}", exc_info=True)
             
     def _set_default_parameters(self):
         """Set reasonable default parameters with conservative uncontrolled behavior"""
